@@ -427,9 +427,9 @@ function renderTimeline() {
               </div>
               ${hasPhoto ? `
                 <div class="timelinePhotoWrap">
-                  <img 
-                    src="${record.photo}" 
-                    alt="${timelinePlant} - ${record.date}" 
+                  <img
+                    src="${record.photo}"
+                    alt="${timelinePlant} - ${record.date}"
                     class="timelinePhoto timelinePhotoClickable"
                     data-compare='${JSON.stringify({ id: record.id, date: record.date, photo: record.photo, plant: timelinePlant })}'
                   />
