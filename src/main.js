@@ -272,8 +272,16 @@ const EXPORT_VERSION = '1.0';
 const EXPORT_APP_ID = 'hxwl-12';
 
 const RECORD_SCHEMA = ['id', 'plant', 'date', 'height', 'leaves', 'water', 'light', 'photo', 'state'];
+const RECORD_REQUIRED_FIELDS = ['id', 'plant', 'date', 'height', 'leaves', 'water', 'light', 'state'];
+const RECORD_OPTIONAL_FIELDS = ['photo'];
+
 const ARCHIVE_SCHEMA = ['id', 'nickname', 'variety', 'acquisitionDate', 'location', 'defaultNotes', 'autoImported', 'createdAt'];
+const ARCHIVE_REQUIRED_FIELDS = ['id', 'nickname'];
+const ARCHIVE_OPTIONAL_FIELDS = ['variety', 'acquisitionDate', 'location', 'defaultNotes', 'autoImported', 'createdAt'];
+
 const GOAL_SCHEMA = ['id', 'plantName', 'targetHeight', 'targetLeaves', 'targetDate', 'createdAt', 'achieved', 'achievedAt', 'startHeight', 'startLeaves'];
+const GOAL_REQUIRED_FIELDS = ['id', 'plantName', 'targetHeight', 'targetLeaves', 'targetDate'];
+const GOAL_OPTIONAL_FIELDS = ['createdAt', 'achieved', 'achievedAt', 'startHeight', 'startLeaves'];
 
 function exportData() {
   const exportObj = {
@@ -319,7 +327,15 @@ function validateImportData(data) {
       duplicateArchive: 0,
       duplicateGoals: 0,
       duplicateCare: 0,
-      missingFields: 0,
+      fileInternalDuplicateRecords: 0,
+      fileInternalDuplicateArchive: 0,
+      fileInternalDuplicateGoals: 0,
+      fileInternalDuplicateCare: 0,
+      missingRequiredFields: 0,
+      missingOptionalFields: 0,
+      blockedRecords: 0,
+      blockedArchive: 0,
+      blockedGoals: 0,
       newRecords: 0,
       newArchive: 0,
       newGoals: 0,
@@ -331,7 +347,23 @@ function validateImportData(data) {
       goals: [],
       care: []
     },
-    missing: {
+    fileInternalDuplicates: {
+      records: [],
+      archive: [],
+      goals: [],
+      care: []
+    },
+    missingRequired: {
+      records: [],
+      archive: [],
+      goals: []
+    },
+    missingOptional: {
+      records: [],
+      archive: [],
+      goals: []
+    },
+    blocked: {
       records: [],
       archive: [],
       goals: []
@@ -382,49 +414,156 @@ function validateImportData(data) {
   result.stats.goals = data.plantGoals.length;
   result.stats.careCompleted = Object.keys(data.careCompleted).length;
 
+  const fileRecordIds = {};
   data.records.forEach((record, index) => {
-    const missing = RECORD_SCHEMA.filter(field => !(field in record));
-    if (missing.length > 0) {
-      result.stats.missingFields++;
-      result.missing.records.push({ index, id: record.id || '未知ID', missing });
+    let isBlocked = false;
+    let blockReasons = [];
+
+    const missingRequired = RECORD_REQUIRED_FIELDS.filter(field => !(field in record));
+    const missingOptional = RECORD_OPTIONAL_FIELDS.filter(field => !(field in record));
+
+    if (missingRequired.length > 0) {
+      result.stats.missingRequiredFields++;
+      result.missingRequired.records.push({ index, id: record.id || '未知ID', missing: missingRequired });
+      isBlocked = true;
+      blockReasons.push(`缺失必填字段: ${missingRequired.join(', ')}`);
     }
-    if (record.id && existingRecordIds.has(record.id)) {
-      result.stats.duplicateRecords++;
-      result.duplicates.records.push({ id: record.id, plant: record.plant, date: record.date });
-    } else if (record.id) {
-      result.stats.newRecords++;
+
+    if (missingOptional.length > 0) {
+      result.stats.missingOptionalFields++;
+      result.missingOptional.records.push({ index, id: record.id || '未知ID', missing: missingOptional });
+    }
+
+    if (record.id) {
+      if (fileRecordIds[record.id]) {
+        result.stats.fileInternalDuplicateRecords++;
+        result.fileInternalDuplicates.records.push({ id: record.id, plant: record.plant, date: record.date, firstIndex: fileRecordIds[record.id], duplicateIndex: index });
+        isBlocked = true;
+        blockReasons.push('文件内ID重复');
+      } else {
+        fileRecordIds[record.id] = index;
+      }
+    } else {
+      isBlocked = true;
+      blockReasons.push('缺少ID字段');
+    }
+
+    if (isBlocked) {
+      result.stats.blockedRecords++;
+      result.blocked.records.push({ index, id: record.id || '未知ID', plant: record.plant, reasons: blockReasons });
+    } else {
+      if (existingRecordIds.has(record.id)) {
+        result.stats.duplicateRecords++;
+        result.duplicates.records.push({ id: record.id, plant: record.plant, date: record.date });
+      } else {
+        result.stats.newRecords++;
+      }
     }
   });
 
+  const fileArchiveIds = {};
   data.plantArchive.forEach((plant, index) => {
-    const missing = ARCHIVE_SCHEMA.filter(field => !(field in plant));
-    if (missing.length > 0) {
-      result.stats.missingFields++;
-      result.missing.archive.push({ index, id: plant.id || '未知ID', nickname: plant.nickname, missing });
+    let isBlocked = false;
+    let blockReasons = [];
+
+    const missingRequired = ARCHIVE_REQUIRED_FIELDS.filter(field => !(field in plant));
+    const missingOptional = ARCHIVE_OPTIONAL_FIELDS.filter(field => !(field in plant));
+
+    if (missingRequired.length > 0) {
+      result.stats.missingRequiredFields++;
+      result.missingRequired.archive.push({ index, id: plant.id || '未知ID', nickname: plant.nickname, missing: missingRequired });
+      isBlocked = true;
+      blockReasons.push(`缺失必填字段: ${missingRequired.join(', ')}`);
     }
-    if (plant.id && existingArchiveIds.has(plant.id)) {
-      result.stats.duplicateArchive++;
-      result.duplicates.archive.push({ id: plant.id, nickname: plant.nickname });
-    } else if (plant.id) {
-      result.stats.newArchive++;
+
+    if (missingOptional.length > 0) {
+      result.stats.missingOptionalFields++;
+      result.missingOptional.archive.push({ index, id: plant.id || '未知ID', nickname: plant.nickname, missing: missingOptional });
+    }
+
+    if (plant.id) {
+      if (fileArchiveIds[plant.id]) {
+        result.stats.fileInternalDuplicateArchive++;
+        result.fileInternalDuplicates.archive.push({ id: plant.id, nickname: plant.nickname, firstIndex: fileArchiveIds[plant.id], duplicateIndex: index });
+        isBlocked = true;
+        blockReasons.push('文件内ID重复');
+      } else {
+        fileArchiveIds[plant.id] = index;
+      }
+    } else {
+      isBlocked = true;
+      blockReasons.push('缺少ID字段');
+    }
+
+    if (isBlocked) {
+      result.stats.blockedArchive++;
+      result.blocked.archive.push({ index, id: plant.id || '未知ID', nickname: plant.nickname, reasons: blockReasons });
+    } else {
+      if (existingArchiveIds.has(plant.id)) {
+        result.stats.duplicateArchive++;
+        result.duplicates.archive.push({ id: plant.id, nickname: plant.nickname });
+      } else {
+        result.stats.newArchive++;
+      }
     }
   });
 
+  const fileGoalIds = {};
   data.plantGoals.forEach((goal, index) => {
-    const missing = GOAL_SCHEMA.filter(field => !(field in goal));
-    if (missing.length > 0) {
-      result.stats.missingFields++;
-      result.missing.goals.push({ index, id: goal.id || '未知ID', plantName: goal.plantName, missing });
+    let isBlocked = false;
+    let blockReasons = [];
+
+    const missingRequired = GOAL_REQUIRED_FIELDS.filter(field => !(field in goal));
+    const missingOptional = GOAL_OPTIONAL_FIELDS.filter(field => !(field in goal));
+
+    if (missingRequired.length > 0) {
+      result.stats.missingRequiredFields++;
+      result.missingRequired.goals.push({ index, id: goal.id || '未知ID', plantName: goal.plantName, missing: missingRequired });
+      isBlocked = true;
+      blockReasons.push(`缺失必填字段: ${missingRequired.join(', ')}`);
     }
-    if (goal.id && existingGoalIds.has(goal.id)) {
-      result.stats.duplicateGoals++;
-      result.duplicates.goals.push({ id: goal.id, plantName: goal.plantName });
-    } else if (goal.id) {
-      result.stats.newGoals++;
+
+    if (missingOptional.length > 0) {
+      result.stats.missingOptionalFields++;
+      result.missingOptional.goals.push({ index, id: goal.id || '未知ID', plantName: goal.plantName, missing: missingOptional });
+    }
+
+    if (goal.id) {
+      if (fileGoalIds[goal.id]) {
+        result.stats.fileInternalDuplicateGoals++;
+        result.fileInternalDuplicates.goals.push({ id: goal.id, plantName: goal.plantName, firstIndex: fileGoalIds[goal.id], duplicateIndex: index });
+        isBlocked = true;
+        blockReasons.push('文件内ID重复');
+      } else {
+        fileGoalIds[goal.id] = index;
+      }
+    } else {
+      isBlocked = true;
+      blockReasons.push('缺少ID字段');
+    }
+
+    if (isBlocked) {
+      result.stats.blockedGoals++;
+      result.blocked.goals.push({ index, id: goal.id || '未知ID', plantName: goal.plantName, reasons: blockReasons });
+    } else {
+      if (existingGoalIds.has(goal.id)) {
+        result.stats.duplicateGoals++;
+        result.duplicates.goals.push({ id: goal.id, plantName: goal.plantName });
+      } else {
+        result.stats.newGoals++;
+      }
     }
   });
 
-  Object.keys(data.careCompleted).forEach(key => {
+  const fileCareKeys = {};
+  Object.keys(data.careCompleted).forEach((key, index) => {
+    if (fileCareKeys[key]) {
+      result.stats.fileInternalDuplicateCare++;
+      result.fileInternalDuplicates.care.push({ key, firstIndex: fileCareKeys[key], duplicateIndex: index });
+    } else {
+      fileCareKeys[key] = index;
+    }
+
     if (existingCareKeys.has(key)) {
       result.stats.duplicateCare++;
       result.duplicates.care.push(key);
@@ -433,11 +572,37 @@ function validateImportData(data) {
     }
   });
 
-  if (result.stats.missingFields > 0) {
+  const totalBlocked = result.stats.blockedRecords + result.stats.blockedArchive + result.stats.blockedGoals;
+  if (totalBlocked > 0) {
+    result.errors.push({
+      type: 'danger',
+      title: `发现 ${totalBlocked} 条记录将被阻止导入`,
+      details: '这些记录缺失必填字段或文件内ID重复，将不会被写入本地存储'
+    });
+  }
+
+  const totalFileInternalDuplicates = result.stats.fileInternalDuplicateRecords + result.stats.fileInternalDuplicateArchive + result.stats.fileInternalDuplicateGoals + result.stats.fileInternalDuplicateCare;
+  if (totalFileInternalDuplicates > 0) {
+    result.errors.push({
+      type: 'danger',
+      title: `发现 ${totalFileInternalDuplicates} 条文件内重复记录`,
+      details: '同一个导入文件内存在重复ID，这些记录将被阻止导入'
+    });
+  }
+
+  if (result.stats.missingRequiredFields > 0) {
+    result.errors.push({
+      type: 'danger',
+      title: `发现 ${result.stats.missingRequiredFields} 条记录缺失必填字段`,
+      details: '这些记录将被阻止导入，请修复后重试'
+    });
+  }
+
+  if (result.stats.missingOptionalFields > 0) {
     result.warnings.push({
       type: 'warning',
-      title: `发现 ${result.stats.missingFields} 条记录存在缺失字段`,
-      details: '缺失字段的记录在导入时会使用默认值或跳过'
+      title: `发现 ${result.stats.missingOptionalFields} 条记录缺失可选字段`,
+      details: '这些记录可以正常导入，缺失字段将使用默认值'
     });
   }
 
@@ -445,7 +610,7 @@ function validateImportData(data) {
   if (totalDuplicates > 0) {
     result.warnings.push({
       type: 'warning',
-      title: `发现 ${totalDuplicates} 条重复记录`,
+      title: `发现 ${totalDuplicates} 条与现有数据重复的记录`,
       details: '请选择处理策略：跳过重复、覆盖现有或全部导入为新记录'
     });
   }
@@ -459,8 +624,12 @@ function validateImportData(data) {
     });
   }
 
-  result.valid = result.errors.length === 0;
-  result.canImport = result.valid && (result.stats.records > 0 || result.stats.archive > 0 || result.stats.goals > 0 || result.stats.careCompleted > 0);
+  const validatableRecords = result.stats.records - result.stats.blockedRecords;
+  const validatableArchive = result.stats.archive - result.stats.blockedArchive;
+  const validatableGoals = result.stats.goals - result.stats.blockedGoals;
+
+  result.valid = true;
+  result.canImport = (validatableRecords > 0 || validatableArchive > 0 || validatableGoals > 0 || result.stats.careCompleted > 0);
 
   return result;
 }
@@ -513,34 +682,92 @@ function renderImportPreview() {
     `;
   }
 
-  let missingDetailsHtml = '';
-  if (result.missing.records.length > 0 || result.missing.archive.length > 0 || result.missing.goals.length > 0) {
-    const recordMissing = result.missing.records.slice(0, 3).map(m =>
-      `<div class="importIssueDetails">记录 #${m.index} ${m.id}: 缺失字段 [${m.missing.join(', ')}]</div>`
+  let missingRequiredDetailsHtml = '';
+  if (result.missingRequired.records.length > 0 || result.missingRequired.archive.length > 0 || result.missingRequired.goals.length > 0) {
+    const recordMissing = result.missingRequired.records.slice(0, 3).map(m =>
+      `<div class="importIssueDetails">记录 #${m.index} ${m.id}: 缺失必填字段 [${m.missing.join(', ')}]</div>`
     ).join('');
-    const archiveMissing = result.missing.archive.slice(0, 3).map(m =>
-      `<div class="importIssueDetails">档案 #${m.index} ${m.nickname || m.id}: 缺失字段 [${m.missing.join(', ')}]</div>`
+    const archiveMissing = result.missingRequired.archive.slice(0, 3).map(m =>
+      `<div class="importIssueDetails">档案 #${m.index} ${m.nickname || m.id}: 缺失必填字段 [${m.missing.join(', ')}]</div>`
     ).join('');
-    const goalMissing = result.missing.goals.slice(0, 3).map(m =>
-      `<div class="importIssueDetails">目标 #${m.index} ${m.plantName || m.id}: 缺失字段 [${m.missing.join(', ')}]</div>`
+    const goalMissing = result.missingRequired.goals.slice(0, 3).map(m =>
+      `<div class="importIssueDetails">目标 #${m.index} ${m.plantName || m.id}: 缺失必填字段 [${m.missing.join(', ')}]</div>`
     ).join('');
 
-    missingDetailsHtml = `
-      <div class="importIssueItem warning">
-        <span class="importIssueIcon">📋</span>
+    missingRequiredDetailsHtml = `
+      <div class="importIssueItem danger">
+        <span class="importIssueIcon">🚫</span>
         <div class="importIssueContent">
-          <strong>缺失字段详情（最多显示前3条）</strong>
+          <strong>缺失必填字段详情（最多显示前3条/类型）</strong>
           ${recordMissing}
           ${archiveMissing}
           ${goalMissing}
+          <div class="importIssueDetails" style="margin-top: 8px; font-weight: 600;">⚠️ 这些记录将被阻止导入</div>
         </div>
       </div>
     `;
   }
 
-  let duplicateDetailsHtml = '';
-  const totalDuplicates = result.stats.duplicateRecords + result.stats.duplicateArchive + result.stats.duplicateGoals + result.stats.duplicateCare;
-  if (totalDuplicates > 0) {
+  let missingOptionalDetailsHtml = '';
+  if (result.missingOptional.records.length > 0 || result.missingOptional.archive.length > 0 || result.missingOptional.goals.length > 0) {
+    const recordMissing = result.missingOptional.records.slice(0, 3).map(m =>
+      `<div class="importIssueDetails">记录 #${m.index} ${m.id}: 缺失可选字段 [${m.missing.join(', ')}]</div>`
+    ).join('');
+    const archiveMissing = result.missingOptional.archive.slice(0, 3).map(m =>
+      `<div class="importIssueDetails">档案 #${m.index} ${m.nickname || m.id}: 缺失可选字段 [${m.missing.join(', ')}]</div>`
+    ).join('');
+    const goalMissing = result.missingOptional.goals.slice(0, 3).map(m =>
+      `<div class="importIssueDetails">目标 #${m.index} ${m.plantName || m.id}: 缺失可选字段 [${m.missing.join(', ')}]</div>`
+    ).join('');
+
+    missingOptionalDetailsHtml = `
+      <div class="importIssueItem warning">
+        <span class="importIssueIcon">📋</span>
+        <div class="importIssueContent">
+          <strong>缺失可选字段详情（最多显示前3条/类型）</strong>
+          ${recordMissing}
+          ${archiveMissing}
+          ${goalMissing}
+          <div class="importIssueDetails" style="margin-top: 8px;">ℹ️ 这些记录可以正常导入，缺失字段将使用默认值</div>
+        </div>
+      </div>
+    `;
+  }
+
+  let fileInternalDuplicateDetailsHtml = '';
+  const totalFileInternalDuplicates = result.stats.fileInternalDuplicateRecords + result.stats.fileInternalDuplicateArchive + result.stats.fileInternalDuplicateGoals + result.stats.fileInternalDuplicateCare;
+  if (totalFileInternalDuplicates > 0) {
+    const recordDup = result.fileInternalDuplicates.records.slice(0, 3).map(d =>
+      `<div class="importIssueDetails">记录 ID ${d.id} (${d.plant}): 第 ${d.firstIndex} 行与第 ${d.duplicateIndex} 行重复</div>`
+    ).join('');
+    const archiveDup = result.fileInternalDuplicates.archive.slice(0, 3).map(d =>
+      `<div class="importIssueDetails">档案 ID ${d.id} (${d.nickname}): 第 ${d.firstIndex} 行与第 ${d.duplicateIndex} 行重复</div>`
+    ).join('');
+    const goalDup = result.fileInternalDuplicates.goals.slice(0, 3).map(d =>
+      `<div class="importIssueDetails">目标 ID ${d.id} (${d.plantName}): 第 ${d.firstIndex} 行与第 ${d.duplicateIndex} 行重复</div>`
+    ).join('');
+    const careDup = result.fileInternalDuplicates.care.slice(0, 3).map(d =>
+      `<div class="importIssueDetails">养护 ${d.key}: 第 ${d.firstIndex} 行与第 ${d.duplicateIndex} 行重复</div>`
+    ).join('');
+
+    fileInternalDuplicateDetailsHtml = `
+      <div class="importIssueItem danger">
+        <span class="importIssueIcon">🔄</span>
+        <div class="importIssueContent">
+          <strong>文件内重复记录详情（最多显示前3条/类型）</strong>
+          ${recordDup}
+          ${archiveDup}
+          ${goalDup}
+          ${careDup}
+          <div class="importIssueDetails" style="margin-top: 8px; font-weight: 600;">⚠️ 这些重复记录将被阻止导入</div>
+        </div>
+      </div>
+    `;
+  }
+
+  let existingDuplicateDetailsHtml = '';
+  const totalExistingDuplicates = result.stats.duplicateRecords + result.stats.duplicateArchive + result.stats.duplicateGoals + result.stats.duplicateCare;
+  if (totalExistingDuplicates > 0) {
     const recordDup = result.duplicates.records.slice(0, 3).map(d =>
       `<div class="importIssueDetails">记录: ${d.plant} (${d.date})</div>`
     ).join('');
@@ -554,25 +781,53 @@ function renderImportPreview() {
       `<div class="importIssueDetails">养护: ${d}</div>`
     ).join('');
 
-    duplicateDetailsHtml = `
+    existingDuplicateDetailsHtml = `
       <div class="importIssueItem warning">
         <span class="importIssueIcon">🔄</span>
         <div class="importIssueContent">
-          <strong>重复记录详情（最多显示前3条/类型）</strong>
+          <strong>与现有数据重复记录详情（最多显示前3条/类型）</strong>
           ${recordDup}
           ${archiveDup}
           ${goalDup}
           ${careDup}
+          <div class="importIssueDetails" style="margin-top: 8px;">ℹ️ 可选择处理策略决定如何处理这些记录</div>
+        </div>
+      </div>
+    `;
+  }
+
+  let blockedDetailsHtml = '';
+  const totalBlocked = result.stats.blockedRecords + result.stats.blockedArchive + result.stats.blockedGoals;
+  if (totalBlocked > 0) {
+    const recordBlocked = result.blocked.records.slice(0, 3).map(b =>
+      `<div class="importIssueDetails">记录 #${b.index} ${b.plant || b.id}: ${b.reasons.join('; ')}</div>`
+    ).join('');
+    const archiveBlocked = result.blocked.archive.slice(0, 3).map(b =>
+      `<div class="importIssueDetails">档案 #${b.index} ${b.nickname || b.id}: ${b.reasons.join('; ')}</div>`
+    ).join('');
+    const goalBlocked = result.blocked.goals.slice(0, 3).map(b =>
+      `<div class="importIssueDetails">目标 #${b.index} ${b.plantName || b.id}: ${b.reasons.join('; ')}</div>`
+    ).join('');
+
+    blockedDetailsHtml = `
+      <div class="importIssueItem danger">
+        <span class="importIssueIcon">🚫</span>
+        <div class="importIssueContent">
+          <strong>被阻止导入的记录（最多显示前3条/类型）</strong>
+          ${recordBlocked}
+          ${archiveBlocked}
+          ${goalBlocked}
+          <div class="importIssueDetails" style="margin-top: 8px; font-weight: 600;">⚠️ 共 ${totalBlocked} 条记录不会被写入本地存储</div>
         </div>
       </div>
     `;
   }
 
   let strategyHtml = '';
-  if (totalDuplicates > 0 && result.canImport) {
+  if (totalExistingDuplicates > 0 && result.canImport) {
     strategyHtml = `
       <div class="importStrategySelector">
-        <label>请选择重复记录处理策略：</label>
+        <label>请选择与现有数据重复的记录处理策略：</label>
         <div class="importStrategyOptions">
           <label class="importStrategyOption">
             <input type="radio" name="importStrategy" value="skip" ${importStrategy === 'skip' ? 'checked' : ''} />
@@ -599,6 +854,10 @@ function renderImportPreview() {
       </div>
     `;
   }
+
+  const totalNew = result.stats.newRecords + result.stats.newArchive + result.stats.newGoals + result.stats.newCare;
+  const totalMissingRequired = result.stats.missingRequiredFields;
+  const totalMissingOptional = result.stats.missingOptionalFields;
 
   importModalBody.innerHTML = `
     <div class="importSummary">
@@ -631,26 +890,37 @@ function renderImportPreview() {
         <div class="importSummaryGrid">
           <div class="importSummaryItem success">
             <span class="importSummaryLabel">新增记录</span>
-            <span class="importSummaryValue">${result.stats.newRecords + result.stats.newArchive + result.stats.newGoals + result.stats.newCare}</span>
+            <span class="importSummaryValue">${totalNew}</span>
           </div>
-          <div class="importSummaryItem ${result.stats.duplicateRecords + result.stats.duplicateArchive + result.stats.duplicateGoals + result.stats.duplicateCare > 0 ? 'warning' : ''}">
-            <span class="importSummaryLabel">重复记录</span>
-            <span class="importSummaryValue">${result.stats.duplicateRecords + result.stats.duplicateArchive + result.stats.duplicateGoals + result.stats.duplicateCare}</span>
+          <div class="importSummaryItem ${totalExistingDuplicates > 0 ? 'warning' : ''}">
+            <span class="importSummaryLabel">与现有重复</span>
+            <span class="importSummaryValue">${totalExistingDuplicates}</span>
           </div>
-          <div class="importSummaryItem ${result.stats.missingFields > 0 ? 'warning' : ''}">
-            <span class="importSummaryLabel">缺失字段</span>
-            <span class="importSummaryValue">${result.stats.missingFields}</span>
+          <div class="importSummaryItem ${totalFileInternalDuplicates > 0 ? 'danger' : ''}">
+            <span class="importSummaryLabel">文件内重复</span>
+            <span class="importSummaryValue">${totalFileInternalDuplicates}</span>
           </div>
-          <div class="importSummaryItem ${result.errors.length > 0 ? 'danger' : 'success'}">
-            <span class="importSummaryLabel">导入状态</span>
-            <span class="importSummaryValue">${result.errors.length > 0 ? '❌' : '✅'}</span>
+          <div class="importSummaryItem ${totalMissingRequired > 0 ? 'danger' : ''}">
+            <span class="importSummaryLabel">缺失必填字段</span>
+            <span class="importSummaryValue">${totalMissingRequired}</span>
+          </div>
+          <div class="importSummaryItem ${totalMissingOptional > 0 ? 'warning' : ''}">
+            <span class="importSummaryLabel">缺失可选字段</span>
+            <span class="importSummaryValue">${totalMissingOptional}</span>
+          </div>
+          <div class="importSummaryItem ${totalBlocked > 0 ? 'danger' : 'success'}">
+            <span class="importSummaryLabel">被阻止导入</span>
+            <span class="importSummaryValue">${totalBlocked}</span>
           </div>
         </div>
       </div>
 
       ${issuesHtml}
-      ${missingDetailsHtml}
-      ${duplicateDetailsHtml}
+      ${fileInternalDuplicateDetailsHtml}
+      ${missingRequiredDetailsHtml}
+      ${missingOptionalDetailsHtml}
+      ${existingDuplicateDetailsHtml}
+      ${blockedDetailsHtml}
       ${strategyHtml}
     </div>
   `;
@@ -712,13 +982,28 @@ function processImportFile(file) {
       errors: [{ type: 'danger', title: '文件读取失败', details: '无法读取选中的文件' }],
       warnings: [],
       info: [],
-      stats: { records: 0, archive: 0, goals: 0, careCompleted: 0, duplicateRecords: 0, duplicateArchive: 0, duplicateGoals: 0, duplicateCare: 0, missingFields: 0, newRecords: 0, newArchive: 0, newGoals: 0, newCare: 0 },
+      stats: { records: 0, archive: 0, goals: 0, careCompleted: 0, duplicateRecords: 0, duplicateArchive: 0, duplicateGoals: 0, duplicateCare: 0, fileInternalDuplicateRecords: 0, fileInternalDuplicateArchive: 0, fileInternalDuplicateGoals: 0, fileInternalDuplicateCare: 0, missingRequiredFields: 0, missingOptionalFields: 0, blockedRecords: 0, blockedArchive: 0, blockedGoals: 0, newRecords: 0, newArchive: 0, newGoals: 0, newCare: 0 },
       duplicates: { records: [], archive: [], goals: [], care: [] },
-      missing: { records: [], archive: [], goals: [] }
+      fileInternalDuplicates: { records: [], archive: [], goals: [], care: [] },
+      missingRequired: { records: [], archive: [], goals: [] },
+      missingOptional: { records: [], archive: [], goals: [] },
+      blocked: { records: [], archive: [], goals: [] }
     };
     renderImportPreview();
   };
   reader.readAsText(file);
+}
+
+function isRecordBlocked(record, result) {
+  return result.blocked.records.some(r => r.id === record.id);
+}
+
+function isArchiveBlocked(plant, result) {
+  return result.blocked.archive.some(p => p.id === plant.id);
+}
+
+function isGoalBlocked(goal, result) {
+  return result.blocked.goals.some(g => g.id === goal.id);
 }
 
 function performImport() {
@@ -744,8 +1029,25 @@ function performImport() {
     const existingGoalIds = new Set(plantGoals.map(g => g.id));
     const existingCareKeys = new Set(Object.keys(careCompleted));
 
+    const fileInternalDuplicateRecordIds = new Set(result.fileInternalDuplicates.records.map(d => d.id));
+    const fileInternalDuplicateArchiveIds = new Set(result.fileInternalDuplicates.archive.map(d => d.id));
+    const fileInternalDuplicateGoalIds = new Set(result.fileInternalDuplicates.goals.map(d => d.id));
+    const fileInternalDuplicateCareKeys = new Set(result.fileInternalDuplicates.care.map(d => d.key));
+
+    let importedRecords = 0;
+    let importedArchive = 0;
+    let importedGoals = 0;
+    let importedCare = 0;
+
     data.records.forEach(record => {
-      const hasId = record.id && existingRecordIds.has(record.id);
+      if (!record.id) return;
+      if (fileInternalDuplicateRecordIds.has(record.id)) return;
+      if (isRecordBlocked(record, result)) return;
+
+      const missingRequired = RECORD_REQUIRED_FIELDS.filter(field => !(field in record));
+      if (missingRequired.length > 0) return;
+
+      const hasId = existingRecordIds.has(record.id);
       if (strategy === 'skip' && hasId) return;
       if (strategy === 'overwrite' && hasId) {
         records = records.map(r => r.id === record.id ? { ...record } : r);
@@ -754,10 +1056,18 @@ function performImport() {
       } else {
         records.unshift({ ...record });
       }
+      importedRecords++;
     });
 
     data.plantArchive.forEach(plant => {
-      const hasId = plant.id && existingArchiveIds.has(plant.id);
+      if (!plant.id) return;
+      if (fileInternalDuplicateArchiveIds.has(plant.id)) return;
+      if (isArchiveBlocked(plant, result)) return;
+
+      const missingRequired = ARCHIVE_REQUIRED_FIELDS.filter(field => !(field in plant));
+      if (missingRequired.length > 0) return;
+
+      const hasId = existingArchiveIds.has(plant.id);
       if (strategy === 'skip' && hasId) return;
       if (strategy === 'overwrite' && hasId) {
         plantArchive = plantArchive.map(p => p.id === plant.id ? { ...plant } : p);
@@ -769,10 +1079,18 @@ function performImport() {
           plantArchive.push({ ...plant });
         }
       }
+      importedArchive++;
     });
 
     data.plantGoals.forEach(goal => {
-      const hasId = goal.id && existingGoalIds.has(goal.id);
+      if (!goal.id) return;
+      if (fileInternalDuplicateGoalIds.has(goal.id)) return;
+      if (isGoalBlocked(goal, result)) return;
+
+      const missingRequired = GOAL_REQUIRED_FIELDS.filter(field => !(field in goal));
+      if (missingRequired.length > 0) return;
+
+      const hasId = existingGoalIds.has(goal.id);
       if (strategy === 'skip' && hasId) return;
       if (strategy === 'overwrite' && hasId) {
         plantGoals = plantGoals.map(g => g.id === goal.id ? { ...goal } : g);
@@ -781,16 +1099,16 @@ function performImport() {
       } else {
         plantGoals.push({ ...goal });
       }
+      importedGoals++;
     });
 
     Object.entries(data.careCompleted).forEach(([key, value]) => {
+      if (fileInternalDuplicateCareKeys.has(key)) return;
+
       const hasKey = existingCareKeys.has(key);
       if (strategy === 'skip' && hasKey) return;
-      if (strategy === 'duplicate') {
-        careCompleted[key] = value;
-      } else {
-        careCompleted[key] = value;
-      }
+      careCompleted[key] = value;
+      importedCare++;
     });
 
     save();
@@ -798,7 +1116,29 @@ function performImport() {
     saveGoals();
     saveCare();
 
-    alert(`导入成功！\n\n生长记录: ${result.stats.records} 条\n植物档案: ${result.stats.archive} 条\n生长目标: ${result.stats.goals} 条\n养护完成: ${result.stats.careCompleted} 项\n\n处理策略: ${strategy === 'skip' ? '跳过重复' : strategy === 'overwrite' ? '覆盖现有' : '全部作为新记录'}`);
+    const totalBlocked = result.stats.blockedRecords + result.stats.blockedArchive + result.stats.blockedGoals;
+    const totalFileInternalDuplicates = result.stats.fileInternalDuplicateRecords + result.stats.fileInternalDuplicateArchive + result.stats.fileInternalDuplicateGoals + result.stats.fileInternalDuplicateCare;
+
+    let message = `导入完成！\n\n`;
+    message += `✅ 成功导入:\n`;
+    message += `  生长记录: ${importedRecords} 条\n`;
+    message += `  植物档案: ${importedArchive} 条\n`;
+    message += `  生长目标: ${importedGoals} 条\n`;
+    message += `  养护完成: ${importedCare} 项\n\n`;
+    message += `处理策略: ${strategy === 'skip' ? '跳过重复' : strategy === 'overwrite' ? '覆盖现有' : '全部作为新记录'}\n`;
+
+    if (totalBlocked > 0 || totalFileInternalDuplicates > 0) {
+      message += `\n⚠️  被阻止的记录:\n`;
+      if (totalBlocked > 0) {
+        message += `  缺失必填字段: ${result.stats.blockedRecords + result.stats.blockedArchive + result.stats.blockedGoals} 条\n`;
+      }
+      if (totalFileInternalDuplicates > 0) {
+        message += `  文件内ID重复: ${totalFileInternalDuplicates} 条\n`;
+      }
+      message += `\n这些记录未被写入本地存储。`;
+    }
+
+    alert(message);
 
     closeImportModal();
     render();
