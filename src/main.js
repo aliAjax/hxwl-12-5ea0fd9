@@ -2,6 +2,8 @@ import './styles.css';
 
 const key = 'hxwl-12-plant-growth';
 const careKey = 'hxwl-12-plant-care';
+const archiveKey = 'hxwl-12-plant-archive';
+
 const seed = [
   { id: crypto.randomUUID(), plant: '窗台薄荷', date: '2026-06-01', height: 12, leaves: 18, water: 80, light: 5.5, photo: 'https://images.unsplash.com/photo-1628556270448-4d4e4148e1b1?auto=format&fit=crop&w=600&q=80', state: '新叶展开，长势良好' },
   { id: crypto.randomUUID(), plant: '窗台薄荷', date: '2026-06-03', height: 13.4, leaves: 22, water: 60, light: 4.8, photo: 'https://images.unsplash.com/photo-1598437279683-6384d16c32cc?auto=format&fit=crop&w=600&q=80', state: '叶色稳定，边缘锯齿清晰' },
@@ -13,6 +15,7 @@ const seed = [
 
 let records = JSON.parse(localStorage.getItem(key) || 'null') || seed;
 let careCompleted = JSON.parse(localStorage.getItem(careKey) || 'null') || {};
+let plantArchive = JSON.parse(localStorage.getItem(archiveKey) || 'null') || [];
 let editingId = null;
 let careExpanded = true;
 let careFilterPlant = '';
@@ -21,6 +24,8 @@ let timelinePlant = '';
 let comparePhoto1 = null;
 let comparePhoto2 = null;
 let compareModalVisible = false;
+let archiveEditingId = null;
+let archiveExpanded = true;
 
 document.querySelector('#app').innerHTML = `
   <main class="shell">
@@ -33,10 +38,42 @@ document.querySelector('#app').innerHTML = `
       <button id="sample">载入示例</button>
     </header>
 
+    <section class="panel archivePanel" id="archivePanel">
+      <div class="panelHead archiveHead">
+        <div class="archiveTitle">
+          <h2>🌿 植物档案</h2>
+          <span class="archiveBadge" id="archiveBadge"></span>
+        </div>
+        <button class="archiveToggle" id="archiveToggle">收起</button>
+      </div>
+      <div class="archiveBody" id="archiveBody">
+        <form id="archiveForm" class="archiveForm">
+          <h3 id="archiveFormTitle">新增植物档案</h3>
+          <div class="archiveFormGrid">
+            <input name="nickname" placeholder="植物昵称 *" required />
+            <input name="variety" placeholder="品种" />
+            <input name="acquisitionDate" type="date" />
+            <input name="location" placeholder="摆放位置" />
+          </div>
+          <textarea name="defaultNotes" placeholder="默认养护备注"></textarea>
+          <div class="archiveFormActions">
+            <button type="submit" class="primary" id="archiveSaveBtn">保存档案</button>
+            <button type="button" class="archiveCancel" id="archiveCancelBtn" style="display: none;">取消</button>
+          </div>
+        </form>
+        <div class="archiveList" id="archiveList"></div>
+      </div>
+    </section>
+
     <section class="layout">
       <form id="form" class="panel">
         <h2>生长记录</h2>
-        <input name="plant" placeholder="植物名称" required />
+        <div class="plantSelectWrap">
+          <select name="plant" id="plantSelect" required>
+            <option value="">选择植物</option>
+          </select>
+          <button type="button" class="quickAddPlant" id="quickAddPlant" title="快速新增植物">+ 新增</button>
+        </div>
         <input name="date" type="date" required />
         <div class="pair">
           <input name="height" type="number" min="0" step="0.1" placeholder="高度cm" required />
@@ -48,6 +85,7 @@ document.querySelector('#app').innerHTML = `
         </div>
         <input name="photo" placeholder="状态照片链接" />
         <textarea name="state" placeholder="状态描述" required></textarea>
+        <div id="plantNotesHint" class="plantNotesHint" style="display: none;"></div>
         <button class="primary">保存记录</button>
       </form>
 
@@ -136,6 +174,109 @@ const timelinePlantFilter = document.querySelector('#timelinePlantFilter');
 const compareModal = document.querySelector('#compareModal');
 const compareClose = document.querySelector('#compareClose');
 const compareClear = document.querySelector('#compareClear');
+const archiveForm = document.querySelector('#archiveForm');
+const archiveToggle = document.querySelector('#archiveToggle');
+const plantSelect = document.querySelector('#plantSelect');
+const quickAddPlant = document.querySelector('#quickAddPlant');
+const plantNotesHint = document.querySelector('#plantNotesHint');
+const archiveCancelBtn = document.querySelector('#archiveCancelBtn');
+const archiveFormTitle = document.querySelector('#archiveFormTitle');
+
+function saveArchive() {
+  localStorage.setItem(archiveKey, JSON.stringify(plantArchive));
+}
+
+function syncPlantsFromRecords() {
+  const recordPlants = [...new Set(records.map((r) => r.plant))];
+  const archivePlants = plantArchive.map((p) => p.nickname);
+  let changed = false;
+  recordPlants.forEach((plantName) => {
+    if (!archivePlants.includes(plantName)) {
+      plantArchive.push({
+        id: crypto.randomUUID(),
+        nickname: plantName,
+        variety: '',
+        acquisitionDate: '',
+        location: '',
+        defaultNotes: '',
+        autoImported: true,
+        createdAt: formatDate(new Date())
+      });
+      changed = true;
+    }
+  });
+  if (changed) {
+    saveArchive();
+  }
+}
+
+function updatePlantSelect() {
+  const plants = plantArchive
+    .slice()
+    .sort((a, b) => a.nickname.localeCompare(b.nickname));
+  plantSelect.innerHTML = `<option value="">选择植物</option>${plants.map((p) => `<option value="${p.nickname}">${p.nickname}${p.variety ? ` (${p.variety})` : ''}</option>`).join('')}`;
+}
+
+function showPlantNotesHint(plantName) {
+  const plant = plantArchive.find((p) => p.nickname === plantName);
+  if (plant && plant.defaultNotes) {
+    plantNotesHint.innerHTML = `<span class="notesHintIcon">📝</span><span class="notesHintText">养护备注：${plant.defaultNotes}</span>`;
+    plantNotesHint.style.display = 'block';
+  } else {
+    plantNotesHint.style.display = 'none';
+  }
+}
+
+archiveForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(archiveForm).entries());
+  if (archiveEditingId) {
+    plantArchive = plantArchive.map((p) =>
+      p.id === archiveEditingId ? { ...p, ...data, autoImported: false } : p
+    );
+  } else {
+    const exists = plantArchive.find((p) => p.nickname === data.nickname);
+    if (exists) {
+      alert(`已存在名为「${data.nickname}」的植物档案`);
+      return;
+    }
+    plantArchive.push({
+      ...data,
+      id: crypto.randomUUID(),
+      autoImported: false,
+      createdAt: formatDate(new Date())
+    });
+  }
+  archiveEditingId = null;
+  archiveForm.reset();
+  archiveCancelBtn.style.display = 'none';
+  archiveFormTitle.textContent = '新增植物档案';
+  saveArchive();
+  renderArchive();
+  updatePlantSelect();
+});
+
+archiveCancelBtn.addEventListener('click', () => {
+  archiveEditingId = null;
+  archiveForm.reset();
+  archiveCancelBtn.style.display = 'none';
+  archiveFormTitle.textContent = '新增植物档案';
+});
+
+archiveToggle.addEventListener('click', () => {
+  archiveExpanded = !archiveExpanded;
+  document.querySelector('#archiveBody').style.display = archiveExpanded ? 'block' : 'none';
+  archiveToggle.textContent = archiveExpanded ? '收起' : '展开';
+});
+
+plantSelect.addEventListener('change', () => {
+  showPlantNotesHint(plantSelect.value);
+});
+
+quickAddPlant.addEventListener('click', () => {
+  document.querySelector('#archivePanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  archiveForm.elements.nickname.focus();
+});
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -144,7 +285,9 @@ form.addEventListener('submit', (event) => {
   records = editingId ? records.map((record) => (record.id === editingId ? item : record)) : [item, ...records];
   editingId = null;
   form.reset();
+  plantNotesHint.style.display = 'none';
   save();
+  syncPlantsFromRecords();
   render();
 });
 
@@ -540,6 +683,87 @@ function clearCompareSelection() {
   updateCompareModal();
 }
 
+function renderArchive() {
+  const autoImportedCount = plantArchive.filter((p) => p.autoImported).length;
+  const totalCount = plantArchive.length;
+  document.querySelector('#archiveBadge').textContent = `共 ${totalCount} 株${autoImportedCount > 0 ? ` · ${autoImportedCount} 株待完善` : ''}`;
+  document.querySelector('#archiveBadge').className = `archiveBadge ${autoImportedCount > 0 ? 'badge-pending' : 'badge-ok'}`;
+
+  const sorted = plantArchive.slice().sort((a, b) => {
+    if (a.autoImported && !b.autoImported) return -1;
+    if (!a.autoImported && b.autoImported) return 1;
+    return a.nickname.localeCompare(b.nickname);
+  });
+
+  const archiveList = document.querySelector('#archiveList');
+  if (sorted.length === 0) {
+    archiveList.innerHTML = '<p class="empty">暂无植物档案，添加第一株植物开始记录吧</p>';
+    return;
+  }
+
+  archiveList.innerHTML = sorted.map((plant) => {
+    const recordCount = records.filter((r) => r.plant === plant.nickname).length;
+    return `
+      <div class="archiveCard ${plant.autoImported ? 'auto-imported' : ''}">
+        <div class="archiveCardHead">
+          <div class="archivePlantName">
+            <strong>${plant.nickname}</strong>
+            ${plant.variety ? `<span class="archiveVariety">${plant.variety}</span>` : ''}
+            ${plant.autoImported ? '<span class="autoImportedTag">待完善</span>' : ''}
+          </div>
+          <div class="archiveRecordCount">${recordCount} 条记录</div>
+        </div>
+        <div class="archiveCardBody">
+          ${plant.acquisitionDate ? `<div class="archiveInfoItem"><span class="archiveInfoLabel">入手日期</span><span>${plant.acquisitionDate}</span></div>` : ''}
+          ${plant.location ? `<div class="archiveInfoItem"><span class="archiveInfoLabel">摆放位置</span><span>${plant.location}</span></div>` : ''}
+          ${plant.defaultNotes ? `<div class="archiveInfoItem"><span class="archiveInfoLabel">养护备注</span><span>${plant.defaultNotes}</span></div>` : ''}
+          ${plant.autoImported && !plant.acquisitionDate && !plant.location && !plant.defaultNotes ? '<div class="archiveHint">点击「完善信息」补充植物详情</div>' : ''}
+        </div>
+        <div class="archiveCardActions">
+          <button class="archiveEditBtn" data-archive-edit="${plant.id}">${plant.autoImported ? '完善信息' : '编辑'}</button>
+          <button class="archiveDelBtn" data-archive-del="${plant.id}">删除</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  document.querySelectorAll('[data-archive-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const plant = plantArchive.find((p) => p.id === btn.dataset.archiveEdit);
+      if (plant) {
+        archiveEditingId = plant.id;
+        archiveForm.elements.nickname.value = plant.nickname;
+        archiveForm.elements.variety.value = plant.variety || '';
+        archiveForm.elements.acquisitionDate.value = plant.acquisitionDate || '';
+        archiveForm.elements.location.value = plant.location || '';
+        archiveForm.elements.defaultNotes.value = plant.defaultNotes || '';
+        archiveCancelBtn.style.display = 'inline-block';
+        archiveFormTitle.textContent = '编辑植物档案';
+        archiveForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-archive-del]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const plant = plantArchive.find((p) => p.id === btn.dataset.archiveDel);
+      if (plant) {
+        const recordCount = records.filter((r) => r.plant === plant.nickname).length;
+        let confirmMsg = `确定要删除「${plant.nickname}」的档案吗？`;
+        if (recordCount > 0) {
+          confirmMsg += `\n\n该植物有 ${recordCount} 条生长记录，删除档案后这些记录仍会保留，但该植物将从下拉选择中消失。`;
+        }
+        if (confirm(confirmMsg)) {
+          plantArchive = plantArchive.filter((p) => p.id !== btn.dataset.archiveDel);
+          saveArchive();
+          renderArchive();
+          updatePlantSelect();
+        }
+      }
+    });
+  });
+}
+
 function renderCareCalendar() {
   const schedule = generateCareSchedule();
   const plants = [...new Set(records.map((r) => r.plant))].sort();
@@ -629,6 +853,10 @@ function renderCareCalendar() {
 }
 
 function render() {
+  syncPlantsFromRecords();
+  updatePlantSelect();
+  renderArchive();
+
   const selectedPlant = filter.value;
   const plants = [...new Set(records.map((record) => record.plant))].sort();
   filter.innerHTML = `<option value="">全部植物</option>${plants.map((plant) => `<option>${plant}</option>`).join('')}`;
@@ -661,7 +889,12 @@ function render() {
     const record = records.find((item) => item.id === button.dataset.edit);
     editingId = record.id;
     Object.entries(record).forEach(([name, value]) => {
-      if (form.elements[name]) form.elements[name].value = value;
+      if (form.elements[name]) {
+        form.elements[name].value = value;
+        if (name === 'plant') {
+          showPlantNotesHint(value);
+        }
+      }
     });
   }));
   renderCareCalendar();

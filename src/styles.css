@@ -673,6 +673,248 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
   background: #d1d5db;
 }
 
+.archivePanel {
+  margin: 18px 0;
+}
+
+.archiveHead {
+  margin-bottom: 8px;
+}
+
+.archiveTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.archiveTitle h2 {
+  margin: 0;
+}
+
+.archiveBadge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge-pending {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.badge-ok {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.archiveToggle {
+  background: #e3f3e9;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: #2f855a;
+  font-weight: 500;
+}
+
+.archiveBody {
+  display: block;
+}
+
+.archiveForm {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  background: #f6faf6;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border: 1px solid #e5eee5;
+}
+
+.archiveForm h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #1f2a22;
+}
+
+.archiveFormGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.archiveFormActions {
+  display: flex;
+  gap: 10px;
+}
+
+.archiveCancel {
+  background: #e5e7eb;
+  color: #4b5563;
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-weight: 500;
+}
+
+.archiveList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.archiveCard {
+  background: #fcfffc;
+  border: 1px solid #e5eee5;
+  border-radius: 8px;
+  padding: 16px;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.archiveCard:hover {
+  box-shadow: 0 4px 12px rgba(27, 68, 38, 0.08);
+}
+
+.archiveCard.auto-imported {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
+.archiveCardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.archivePlantName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.archivePlantName strong {
+  font-size: 16px;
+  color: #1f2a22;
+}
+
+.archiveVariety {
+  color: #60715f;
+  font-size: 13px;
+}
+
+.autoImportedTag {
+  background: #fef3c7;
+  color: #d97706;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.archiveRecordCount {
+  color: #60715f;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.archiveCardBody {
+  margin-bottom: 12px;
+}
+
+.archiveInfoItem {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 14px;
+}
+
+.archiveInfoLabel {
+  color: #60715f;
+  min-width: 70px;
+}
+
+.archiveInfoItem span:last-child {
+  color: #1f2a22;
+  flex: 1;
+}
+
+.archiveHint {
+  color: #d97706;
+  font-size: 13px;
+  padding: 8px 12px;
+  background: #fef3c7;
+  border-radius: 6px;
+}
+
+.archiveCardActions {
+  display: flex;
+  gap: 8px;
+}
+
+.archiveEditBtn {
+  background: #2f855a;
+  color: white;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-weight: 500;
+  flex: 1;
+}
+
+.archiveDelBtn {
+  background: #e5e7eb;
+  color: #4b5563;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-weight: 500;
+}
+
+.plantSelectWrap {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.plantSelectWrap select {
+  flex: 1;
+}
+
+.quickAddPlant {
+  background: #e3f3e9;
+  color: #2f855a;
+  border: 0;
+  border-radius: 6px;
+  padding: 11px 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.plantNotesHint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  background: #f0fff4;
+  border: 1px solid #c6f6d5;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #276749;
+}
+
+.notesHintIcon {
+  font-size: 16px;
+}
+
+.notesHintText {
+  flex: 1;
+  line-height: 1.5;
+}
+
 @media (max-width: 900px) {
   .hero, .layout, .cards, .summary, .pair, .record {
     display: block;
@@ -702,5 +944,23 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
   }
   .comparePhoto {
     height: 200px;
+  }
+  .archiveFormGrid {
+    grid-template-columns: 1fr;
+  }
+  .archiveList {
+    grid-template-columns: 1fr;
+  }
+  .plantSelectWrap {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .quickAddPlant {
+    width: 100%;
+  }
+  .archiveHead {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
   }
 }
