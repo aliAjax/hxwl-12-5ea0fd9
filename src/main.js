@@ -1,7 +1,6 @@
 import './styles.css';
 
 const key = 'hxwl-12-plant-growth';
-const careKey = 'hxwl-12-plant-care';
 const seed = [
   { id: crypto.randomUUID(), plant: '窗台薄荷', date: '2026-06-01', height: 12, leaves: 18, water: 80, light: 5.5, photo: '', state: '新叶展开' },
   { id: crypto.randomUUID(), plant: '窗台薄荷', date: '2026-06-03', height: 13.4, leaves: 22, water: 60, light: 4.8, photo: '', state: '叶色稳定' },
@@ -12,11 +11,7 @@ const seed = [
 ];
 
 let records = JSON.parse(localStorage.getItem(key) || 'null') || seed;
-let careCompleted = JSON.parse(localStorage.getItem(careKey) || 'null') || {};
 let editingId = null;
-let careCalendarOpen = false;
-let carePlantFilter = '';
-let careShowOverdue = false;
 
 document.querySelector('#app').innerHTML = `
   <main class="shell">
@@ -65,23 +60,7 @@ document.querySelector('#app').innerHTML = `
     </section>
 
     <section class="panel">
-      <div class="panelHead">
-        <h2>记录列表</h2>
-        <div class="careEntry">
-          <button id="toggleCare" class="primary">📅 养护日历</button>
-          <input id="search" placeholder="搜索植物或状态" />
-        </div>
-      </div>
-      <div class="careCalendar" id="careCalendar" hidden>
-        <div class="careFilters">
-          <select id="carePlantFilter">
-            <option value="">全部植物</option>
-          </select>
-          <label class="checkLabel"><input type="checkbox" id="careShowOverdue" /> 仅看逾期</label>
-          <span class="careStats" id="careStats"></span>
-        </div>
-        <div class="careGrid" id="careGrid"></div>
-      </div>
+      <div class="panelHead"><h2>记录列表</h2><input id="search" placeholder="搜索植物或状态" /></div>
       <div class="records" id="records"></div>
     </section>
   </main>
@@ -90,10 +69,6 @@ document.querySelector('#app').innerHTML = `
 const form = document.querySelector('#form');
 const filter = document.querySelector('#plantFilter');
 const search = document.querySelector('#search');
-const toggleCareBtn = document.querySelector('#toggleCare');
-const careCalendar = document.querySelector('#careCalendar');
-const carePlantFilterEl = document.querySelector('#carePlantFilter');
-const careShowOverdueEl = document.querySelector('#careShowOverdue');
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -114,198 +89,8 @@ document.querySelector('#sample').addEventListener('click', () => {
   render();
 });
 
-toggleCareBtn.addEventListener('click', () => {
-  careCalendarOpen = !careCalendarOpen;
-  careCalendar.hidden = !careCalendarOpen;
-  renderCare();
-});
-
-carePlantFilterEl.addEventListener('change', (e) => {
-  carePlantFilter = e.target.value;
-  renderCare();
-});
-
-careShowOverdueEl.addEventListener('change', (e) => {
-  careShowOverdue = e.target.checked;
-  renderCare();
-});
-
 function save() {
   localStorage.setItem(key, JSON.stringify(records));
-}
-
-function saveCare() {
-  localStorage.setItem(careKey, JSON.stringify(careCompleted));
-}
-
-function getDaysDiff(dateStr) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(dateStr);
-  target.setHours(0, 0, 0, 0);
-  return Math.round((target - today) / (1000 * 60 * 60 * 24));
-}
-
-function generateCareSchedule() {
-  const plantLastRecord = {};
-  records.forEach((record) => {
-    if (!plantLastRecord[record.plant] || record.date > plantLastRecord[record.plant].date) {
-      plantLastRecord[record.plant] = record;
-    }
-  });
-
-  const schedule = [];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  Object.entries(plantLastRecord).forEach(([plant, lastRecord]) => {
-    const lastWaterDate = new Date(lastRecord.date);
-    lastWaterDate.setHours(0, 0, 0, 0);
-    const avgWater = lastRecord.water;
-    const interval = Math.max(2, Math.round(100 / avgWater * 3));
-
-    for (let i = -7; i <= 7; i++) {
-      const scheduleDate = new Date(today);
-      scheduleDate.setDate(today.getDate() + i);
-      const scheduleDateStr = scheduleDate.toISOString().slice(0, 10);
-
-      const daysSinceLastWater = Math.round((scheduleDate - lastWaterDate) / (1000 * 60 * 60 * 24));
-
-      if (daysSinceLastWater > 0 && daysSinceLastWater % interval === 0) {
-        const daysDiff = getDaysDiff(scheduleDateStr);
-        const completed = careCompleted[`${plant}-${scheduleDateStr}`];
-        schedule.push({
-          id: `${plant}-${scheduleDateStr}`,
-          plant,
-          date: scheduleDateStr,
-          water: avgWater,
-          daysDiff,
-          isOverdue: daysDiff < 0 && !completed,
-          isToday: daysDiff === 0
-        });
-      }
-
-      if (daysSinceLastWater === 0 && lastRecord.water > 0) {
-        schedule.push({
-          id: `${plant}-${scheduleDateStr}`,
-          plant,
-          date: scheduleDateStr,
-          water: avgWater,
-          daysDiff: 0,
-          isOverdue: false,
-          isToday: false,
-          isHistory: true
-        });
-      }
-    }
-  });
-
-  schedule.sort((a, b) => a.date.localeCompare(b.date) || a.plant.localeCompare(b.plant));
-  return schedule;
-}
-
-function renderCare() {
-  if (!careCalendarOpen) return;
-
-  const plants = [...new Set(records.map((record) => record.plant))].sort();
-  carePlantFilterEl.innerHTML = `<option value="">全部植物</option>${plants.map((plant) => `<option ${carePlantFilter === plant ? 'selected' : ''}>${plant}</option>`).join('')}`;
-  carePlantFilterEl.value = carePlantFilter && plants.includes(carePlantFilter) ? carePlantFilter : '';
-  careShowOverdueEl.checked = careShowOverdue;
-
-  let schedule = generateCareSchedule();
-
-  if (carePlantFilter) {
-    schedule = schedule.filter((item) => item.plant === carePlantFilter);
-  }
-
-  if (careShowOverdue) {
-    schedule = schedule.filter((item) => item.isOverdue);
-  }
-
-  const totalTasks = schedule.length;
-  const completedCount = schedule.filter((item) => careCompleted[item.id]).length;
-  const overdueCount = schedule.filter((item) => item.isOverdue).length;
-
-  document.querySelector('#careStats').textContent = `共 ${totalTasks} 项，已完成 ${completedCount} 项，逾期 ${overdueCount} 项`;
-
-  const byDate = {};
-  schedule.forEach((item) => {
-    if (!byDate[item.date]) byDate[item.date] = [];
-    byDate[item.date].push(item);
-  });
-
-  const gridEl = document.querySelector('#careGrid');
-  const dates = Object.keys(byDate).sort();
-
-  if (!dates.length) {
-    gridEl.innerHTML = '<p class="careEmpty">暂无养护安排</p>';
-    return;
-  }
-
-  const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-
-  gridEl.innerHTML = dates.map((date) => {
-    const items = byDate[date];
-    const daysDiff = getDaysDiff(date);
-    let dayClass = '';
-    let tagText = '';
-    let tagClass = '';
-
-    if (daysDiff === 0) {
-      dayClass = 'today';
-      tagText = '今天';
-      tagClass = 'today';
-    } else if (daysDiff < 0) {
-      const hasOverdue = items.some((item) => item.isOverdue);
-      if (hasOverdue) {
-        dayClass = 'overdue';
-        tagText = '逾期';
-        tagClass = 'overdue';
-      } else {
-        tagText = '过去';
-        tagClass = 'future';
-      }
-    } else {
-      tagText = `还有 ${daysDiff} 天`;
-      tagClass = 'future';
-    }
-
-    const dateObj = new Date(date);
-    const dateDisplay = `${date.slice(5)} ${weekDays[dateObj.getDay()]}`;
-
-    return `
-      <div class="careDay ${dayClass}">
-        <div class="careDayHeader">
-          <span class="careDayDate">${dateDisplay}</span>
-          <span class="careDayTag ${tagClass}">${tagText}</span>
-        </div>
-        <div class="careTasks">
-          ${items.map((item) => {
-            const completed = careCompleted[item.id];
-            return `
-              <div class="careTask ${completed ? 'completed' : ''}">
-                <input type="checkbox" data-care-id="${item.id}" ${completed ? 'checked' : ''} ${item.isHistory ? 'checked disabled' : ''} />
-                <div class="careTaskText">
-                  <span class="careTaskPlant">${item.plant}</span>
-                  <br />
-                  <span class="careTaskWater">浇水 ${item.water}ml ${item.isHistory ? '（已记录）' : ''}</span>
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  gridEl.querySelectorAll('[data-care-id]').forEach((checkbox) => {
-    checkbox.addEventListener('change', (e) => {
-      const id = e.target.dataset.careId;
-      careCompleted[id] = e.target.checked;
-      saveCare();
-      renderCare();
-    });
-  });
 }
 
 function render() {
@@ -344,7 +129,6 @@ function render() {
       if (form.elements[name]) form.elements[name].value = value;
     });
   }));
-  renderCare();
 }
 
 function drawLine(selector, data, unit, color) {
