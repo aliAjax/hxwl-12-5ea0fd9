@@ -112,10 +112,173 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
 .record a { color: #2f855a; }
 .empty { color: #667866; }
 
+.carePanel { margin: 18px 0; }
+
+.careHead { margin-bottom: 8px; }
+
+.careTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.careTitle h2 { margin: 0; }
+
+.careBadge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge-overdue { background: #fee2e2; color: #dc2626; }
+.badge-today { background: #fef3c7; color: #d97706; }
+.badge-ok { background: #dcfce7; color: #16a34a; }
+
+.careToggle {
+  background: #e3f3e9;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: #2f855a;
+  font-weight: 500;
+}
+
+.careBody { display: block; }
+
+.careFilters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 12px 0 18px;
+}
+
+.careContent {
+  display: grid;
+  gap: 12px;
+}
+
+.date-group {
+  border: 1px solid #e5eee5;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.date-group.overdue { border-color: #fecaca; }
+.date-group.today { border-color: #fcd34d; }
+
+.date-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #f6faf6;
+  font-weight: 600;
+}
+
+.date-group.overdue .date-header { background: #fef2f2; }
+.date-group.today .date-header { background: #fffbeb; }
+
+.date-text { color: #1f2a22; }
+.date-count {
+  color: #60715f;
+  font-size: 13px;
+  font-weight: normal;
+}
+
+.care-items {
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.care-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 6px;
+  background: #fcfffc;
+  border: 1px solid #e5eee5;
+}
+
+.care-item.item-completed {
+  opacity: 0.6;
+  background: #f0f7f0;
+}
+
+.care-item-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.care-plant {
+  font-weight: 600;
+  color: #1f2a22;
+}
+
+.status-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.status-overdue { background: #fee2e2; color: #dc2626; }
+.status-today { background: #fef3c7; color: #d97706; }
+.status-upcoming { background: #dbeafe; color: #2563eb; }
+.status-future { background: #e5e7eb; color: #4b5563; }
+.status-completed { background: #dcfce7; color: #16a34a; }
+
+.care-item-detail {
+  color: #60715f;
+  font-size: 14px;
+}
+
+.care-water {
+  display: inline-block;
+  padding: 4px 10px;
+  background: #eff6ef;
+  border-radius: 12px;
+}
+
+.care-item-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.care-done {
+  background: #2f855a;
+  color: white;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-weight: 600;
+}
+
+.care-undo {
+  background: #e5e7eb;
+  color: #4b5563;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-weight: 500;
+}
+
 @media (max-width: 900px) {
   .hero, .layout, .cards, .summary, .pair, .record {
     display: block;
   }
   .panel, .summary article { margin-top: 14px; }
   .record > * { margin-top: 8px; }
+  .careFilters { grid-template-columns: 1fr; }
+  .care-item {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .care-item-actions { justify-content: flex-start; }
 }
