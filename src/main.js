@@ -435,7 +435,7 @@ function validateImportData(data) {
     }
 
     if (record.id) {
-      if (fileRecordIds[record.id]) {
+      if (Object.prototype.hasOwnProperty.call(fileRecordIds, record.id)) {
         result.stats.fileInternalDuplicateRecords++;
         result.fileInternalDuplicates.records.push({ id: record.id, plant: record.plant, date: record.date, firstIndex: fileRecordIds[record.id], duplicateIndex: index });
         isBlocked = true;
@@ -482,7 +482,7 @@ function validateImportData(data) {
     }
 
     if (plant.id) {
-      if (fileArchiveIds[plant.id]) {
+      if (Object.prototype.hasOwnProperty.call(fileArchiveIds, plant.id)) {
         result.stats.fileInternalDuplicateArchive++;
         result.fileInternalDuplicates.archive.push({ id: plant.id, nickname: plant.nickname, firstIndex: fileArchiveIds[plant.id], duplicateIndex: index });
         isBlocked = true;
@@ -529,7 +529,7 @@ function validateImportData(data) {
     }
 
     if (goal.id) {
-      if (fileGoalIds[goal.id]) {
+      if (Object.prototype.hasOwnProperty.call(fileGoalIds, goal.id)) {
         result.stats.fileInternalDuplicateGoals++;
         result.fileInternalDuplicates.goals.push({ id: goal.id, plantName: goal.plantName, firstIndex: fileGoalIds[goal.id], duplicateIndex: index });
         isBlocked = true;
