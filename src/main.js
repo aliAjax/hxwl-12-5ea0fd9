@@ -1286,13 +1286,19 @@ function render() {
         target: goal.targetHeight,
         targetDate: goal.targetDate.slice(5),
         achieved: goal.achieved,
-        isOverdue: progress ? progress.isOverdue : false
+        isOverdue: progress ? progress.isOverdue : false,
+        remainingText: progress
+          ? (progress.heightRemaining > 0 ? `还差 ${progress.heightRemaining.toFixed(1)}cm` : '高度已达标')
+          : ''
       };
       leafGoal = {
         target: goal.targetLeaves,
         targetDate: goal.targetDate.slice(5),
         achieved: goal.achieved,
-        isOverdue: progress ? progress.isOverdue : false
+        isOverdue: progress ? progress.isOverdue : false,
+        remainingText: progress
+          ? (progress.leavesRemaining > 0 ? `还差 ${progress.leavesRemaining}片` : '叶片已达标')
+          : ''
       };
     }
   }
@@ -1349,13 +1355,15 @@ function drawLine(selector, data, unit, color, goal) {
         : 'stroke="#7c3aed" stroke-dasharray="6,4"';
     const goalLabelColor = goal.achieved ? '#16a34a' : (goal.isOverdue ? '#d97706' : '#7c3aed');
     const goalStatusText = goal.achieved ? '✓ 已达成' : (goal.isOverdue ? '⏰ 已过期' : '🎯 目标');
+    const goalRemainingText = goal.achieved ? '目标已达成' : goal.remainingText;
 
     goalSvg = `
       <line x1="42" y1="${goalY}" x2="462" y2="${goalY}" ${goalLineStyle} stroke-width="2"/>
-      <rect x="462" y="${goalY - 18}" width="110" height="28" rx="4" fill="${goalLabelColor}" opacity="0.1"/>
-      <rect x="462" y="${goalY - 18}" width="110" height="28" rx="4" fill="none" stroke="${goalLabelColor}" stroke-width="1"/>
-      <text x="517" y="${goalY}" text-anchor="middle" fill="${goalLabelColor}" font-size="11" font-weight="600">${goalStatusText}</text>
-      <text x="517" y="${goalY + 10}" text-anchor="middle" fill="${goalLabelColor}" font-size="10">${goal.target}${unit} · ${goal.targetDate}</text>
+      <rect x="462" y="${goalY - 24}" width="116" height="46" rx="4" fill="${goalLabelColor}" opacity="0.1"/>
+      <rect x="462" y="${goalY - 24}" width="116" height="46" rx="4" fill="none" stroke="${goalLabelColor}" stroke-width="1"/>
+      <text x="520" y="${goalY - 7}" text-anchor="middle" fill="${goalLabelColor}" font-size="11" font-weight="600">${goalStatusText}</text>
+      <text x="520" y="${goalY + 5}" text-anchor="middle" fill="${goalLabelColor}" font-size="10">${goal.target}${unit} · ${goal.targetDate}</text>
+      <text x="520" y="${goalY + 17}" text-anchor="middle" fill="${goalLabelColor}" font-size="10" font-weight="600">${goalRemainingText}</text>
     `;
   }
 
