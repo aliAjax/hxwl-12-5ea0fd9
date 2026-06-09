@@ -40,7 +40,12 @@ document.querySelector('#app').innerHTML = `
         <h1>微型植物生长板</h1>
         <span>高度、叶片、浇水和光照的本地记录闭环</span>
       </div>
-      <button id="sample">载入示例</button>
+      <div class="heroActions">
+        <button id="sample">载入示例</button>
+        <button id="exportBtn" class="heroSecondary">📤 导出数据</button>
+        <button id="importBtn" class="heroSecondary">📥 导入数据</button>
+        <input type="file" id="importFile" accept=".json" style="display: none;" />
+      </div>
     </header>
 
     <section id="goalReminder" class="goalReminder" style="display: none;"></section>
@@ -200,6 +205,20 @@ document.querySelector('#app').innerHTML = `
       </form>
     </div>
   </div>
+
+  <div class="importModal" id="importModal" style="display: none;">
+    <div class="importModalContent">
+      <div class="importModalHead">
+        <h3>📥 数据导入预览</h3>
+        <button class="importClose" id="importClose">&times;</button>
+      </div>
+      <div class="importModalBody" id="importModalBody"></div>
+      <div class="importModalFoot" id="importModalFoot">
+        <button type="button" class="importCancel" id="importCancelBtn">取消</button>
+        <button type="button" class="primary" id="importConfirmBtn" disabled>确认导入</button>
+      </div>
+    </div>
+  </div>
 `;
 
 const form = document.querySelector('#form');
@@ -227,12 +246,577 @@ const goalModalTitle = document.querySelector('#goalModalTitle');
 const goalPlantName = document.querySelector('#goalPlantName');
 const goalCurrentInfo = document.querySelector('#goalCurrentInfo');
 
+const exportBtn = document.querySelector('#exportBtn');
+const importBtn = document.querySelector('#importBtn');
+const importFile = document.querySelector('#importFile');
+const importModal = document.querySelector('#importModal');
+const importClose = document.querySelector('#importClose');
+const importCancelBtn = document.querySelector('#importCancelBtn');
+const importConfirmBtn = document.querySelector('#importConfirmBtn');
+const importModalBody = document.querySelector('#importModalBody');
+
+let pendingImportData = null;
+let importValidationResult = null;
+let importStrategy = 'skip';
+let importModalVisible = false;
+
 function saveArchive() {
   localStorage.setItem(archiveKey, JSON.stringify(plantArchive));
 }
 
 function saveGoals() {
   localStorage.setItem(goalsKey, JSON.stringify(plantGoals));
+}
+
+const EXPORT_VERSION = '1.0';
+const EXPORT_APP_ID = 'hxwl-12';
+
+const RECORD_SCHEMA = ['id', 'plant', 'date', 'height', 'leaves', 'water', 'light', 'photo', 'state'];
+const ARCHIVE_SCHEMA = ['id', 'nickname', 'variety', 'acquisitionDate', 'location', 'defaultNotes', 'autoImported', 'createdAt'];
+const GOAL_SCHEMA = ['id', 'plantName', 'targetHeight', 'targetLeaves', 'targetDate', 'createdAt', 'achieved', 'achievedAt', 'startHeight', 'startLeaves'];
+
+function exportData() {
+  const exportObj = {
+    _meta: {
+      appId: EXPORT_APP_ID,
+      version: EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      exportedFrom: window.location.hostname
+    },
+    records: records,
+    plantArchive: plantArchive,
+    plantGoals: plantGoals,
+    careCompleted: careCompleted
+  };
+
+  const jsonStr = JSON.stringify(exportObj, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+
+  const dateStr = formatDate(new Date());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `hxwl-12-植物数据-${dateStr}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function validateImportData(data) {
+  const result = {
+    valid: false,
+    canImport: false,
+    errors: [],
+    warnings: [],
+    info: [],
+    stats: {
+      records: 0,
+      archive: 0,
+      goals: 0,
+      careCompleted: 0,
+      duplicateRecords: 0,
+      duplicateArchive: 0,
+      duplicateGoals: 0,
+      duplicateCare: 0,
+      missingFields: 0,
+      newRecords: 0,
+      newArchive: 0,
+      newGoals: 0,
+      newCare: 0
+    },
+    duplicates: {
+      records: [],
+      archive: [],
+      goals: [],
+      care: []
+    },
+    missing: {
+      records: [],
+      archive: [],
+      goals: []
+    }
+  };
+
+  if (!data || typeof data !== 'object') {
+    result.errors.push({ type: 'danger', title: '文件格式错误', details: '不是有效的JSON对象' });
+    return result;
+  }
+
+  if (!data._meta) {
+    result.warnings.push({ type: 'warning', title: '缺少元数据', details: '该文件没有导出元数据，可能不是本应用导出的文件' });
+  } else {
+    if (data._meta.appId !== EXPORT_APP_ID) {
+      result.errors.push({ type: 'danger', title: '应用标识不匹配', details: `期望 "${EXPORT_APP_ID}"，实际为 "${data._meta.appId}"` });
+      return result;
+    }
+    if (data._meta.version !== EXPORT_VERSION) {
+      result.warnings.push({ type: 'warning', title: '版本不匹配', details: `期望版本 ${EXPORT_VERSION}，实际为 ${data._meta.version}，可能存在兼容性问题` });
+    }
+  }
+
+  if (!Array.isArray(data.records)) {
+    result.errors.push({ type: 'danger', title: '数据结构错误', details: 'records 字段不是数组' });
+    return result;
+  }
+  if (!Array.isArray(data.plantArchive)) {
+    result.errors.push({ type: 'danger', title: '数据结构错误', details: 'plantArchive 字段不是数组' });
+    return result;
+  }
+  if (!Array.isArray(data.plantGoals)) {
+    result.errors.push({ type: 'danger', title: '数据结构错误', details: 'plantGoals 字段不是数组' });
+    return result;
+  }
+  if (!data.careCompleted || typeof data.careCompleted !== 'object') {
+    result.errors.push({ type: 'danger', title: '数据结构错误', details: 'careCompleted 字段不是对象' });
+    return result;
+  }
+
+  const existingRecordIds = new Set(records.map(r => r.id));
+  const existingArchiveIds = new Set(plantArchive.map(p => p.id));
+  const existingGoalIds = new Set(plantGoals.map(g => g.id));
+  const existingCareKeys = new Set(Object.keys(careCompleted));
+
+  result.stats.records = data.records.length;
+  result.stats.archive = data.plantArchive.length;
+  result.stats.goals = data.plantGoals.length;
+  result.stats.careCompleted = Object.keys(data.careCompleted).length;
+
+  data.records.forEach((record, index) => {
+    const missing = RECORD_SCHEMA.filter(field => !(field in record));
+    if (missing.length > 0) {
+      result.stats.missingFields++;
+      result.missing.records.push({ index, id: record.id || '未知ID', missing });
+    }
+    if (record.id && existingRecordIds.has(record.id)) {
+      result.stats.duplicateRecords++;
+      result.duplicates.records.push({ id: record.id, plant: record.plant, date: record.date });
+    } else if (record.id) {
+      result.stats.newRecords++;
+    }
+  });
+
+  data.plantArchive.forEach((plant, index) => {
+    const missing = ARCHIVE_SCHEMA.filter(field => !(field in plant));
+    if (missing.length > 0) {
+      result.stats.missingFields++;
+      result.missing.archive.push({ index, id: plant.id || '未知ID', nickname: plant.nickname, missing });
+    }
+    if (plant.id && existingArchiveIds.has(plant.id)) {
+      result.stats.duplicateArchive++;
+      result.duplicates.archive.push({ id: plant.id, nickname: plant.nickname });
+    } else if (plant.id) {
+      result.stats.newArchive++;
+    }
+  });
+
+  data.plantGoals.forEach((goal, index) => {
+    const missing = GOAL_SCHEMA.filter(field => !(field in goal));
+    if (missing.length > 0) {
+      result.stats.missingFields++;
+      result.missing.goals.push({ index, id: goal.id || '未知ID', plantName: goal.plantName, missing });
+    }
+    if (goal.id && existingGoalIds.has(goal.id)) {
+      result.stats.duplicateGoals++;
+      result.duplicates.goals.push({ id: goal.id, plantName: goal.plantName });
+    } else if (goal.id) {
+      result.stats.newGoals++;
+    }
+  });
+
+  Object.keys(data.careCompleted).forEach(key => {
+    if (existingCareKeys.has(key)) {
+      result.stats.duplicateCare++;
+      result.duplicates.care.push(key);
+    } else {
+      result.stats.newCare++;
+    }
+  });
+
+  if (result.stats.missingFields > 0) {
+    result.warnings.push({
+      type: 'warning',
+      title: `发现 ${result.stats.missingFields} 条记录存在缺失字段`,
+      details: '缺失字段的记录在导入时会使用默认值或跳过'
+    });
+  }
+
+  const totalDuplicates = result.stats.duplicateRecords + result.stats.duplicateArchive + result.stats.duplicateGoals + result.stats.duplicateCare;
+  if (totalDuplicates > 0) {
+    result.warnings.push({
+      type: 'warning',
+      title: `发现 ${totalDuplicates} 条重复记录`,
+      details: '请选择处理策略：跳过重复、覆盖现有或全部导入为新记录'
+    });
+  }
+
+  const totalNew = result.stats.newRecords + result.stats.newArchive + result.stats.newGoals + result.stats.newCare;
+  if (totalNew > 0) {
+    result.info.push({
+      type: 'info',
+      title: `发现 ${totalNew} 条新记录`,
+      details: '这些记录将被添加到现有数据中'
+    });
+  }
+
+  result.valid = result.errors.length === 0;
+  result.canImport = result.valid && (result.stats.records > 0 || result.stats.archive > 0 || result.stats.goals > 0 || result.stats.careCompleted > 0);
+
+  return result;
+}
+
+function renderImportPreview() {
+  if (!pendingImportData || !importValidationResult) {
+    importModalBody.innerHTML = `
+      <div class="importEmpty">
+        <div class="importEmptyIcon">📁</div>
+        <h4>选择要导入的文件</h4>
+        <p>点击下方按钮选择JSON格式的数据文件</p>
+      </div>
+    `;
+    importConfirmBtn.disabled = true;
+    return;
+  }
+
+  const result = importValidationResult;
+  const data = pendingImportData;
+
+  let fileInfoHtml = '';
+  if (data._meta) {
+    fileInfoHtml = `
+      <div class="importFileInfo">
+        <strong>文件信息：</strong>
+        ${data._meta.exportedAt ? `导出时间: ${new Date(data._meta.exportedAt).toLocaleString('zh-CN')}` : ''}
+        ${data._meta.exportedFrom ? ` · 来源: ${data._meta.exportedFrom}` : ''}
+        ${data._meta.version ? ` · 版本: v${data._meta.version}` : ''}
+      </div>
+    `;
+  }
+
+  let issuesHtml = '';
+  const allIssues = [...result.errors, ...result.warnings, ...result.info];
+  if (allIssues.length > 0) {
+    issuesHtml = `
+      <div class="importIssues">
+        ${allIssues.map(issue => `
+          <div class="importIssueItem ${issue.type}">
+            <span class="importIssueIcon">
+              ${issue.type === 'danger' ? '❌' : issue.type === 'warning' ? '⚠️' : 'ℹ️'}
+            </span>
+            <div class="importIssueContent">
+              <strong>${issue.title}</strong>
+              ${issue.details ? `<div>${issue.details}</div>` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  let missingDetailsHtml = '';
+  if (result.missing.records.length > 0 || result.missing.archive.length > 0 || result.missing.goals.length > 0) {
+    const recordMissing = result.missing.records.slice(0, 3).map(m =>
+      `<div class="importIssueDetails">记录 #${m.index} ${m.id}: 缺失字段 [${m.missing.join(', ')}]</div>`
+    ).join('');
+    const archiveMissing = result.missing.archive.slice(0, 3).map(m =>
+      `<div class="importIssueDetails">档案 #${m.index} ${m.nickname || m.id}: 缺失字段 [${m.missing.join(', ')}]</div>`
+    ).join('');
+    const goalMissing = result.missing.goals.slice(0, 3).map(m =>
+      `<div class="importIssueDetails">目标 #${m.index} ${m.plantName || m.id}: 缺失字段 [${m.missing.join(', ')}]</div>`
+    ).join('');
+
+    missingDetailsHtml = `
+      <div class="importIssueItem warning">
+        <span class="importIssueIcon">📋</span>
+        <div class="importIssueContent">
+          <strong>缺失字段详情（最多显示前3条）</strong>
+          ${recordMissing}
+          ${archiveMissing}
+          ${goalMissing}
+        </div>
+      </div>
+    `;
+  }
+
+  let duplicateDetailsHtml = '';
+  const totalDuplicates = result.stats.duplicateRecords + result.stats.duplicateArchive + result.stats.duplicateGoals + result.stats.duplicateCare;
+  if (totalDuplicates > 0) {
+    const recordDup = result.duplicates.records.slice(0, 3).map(d =>
+      `<div class="importIssueDetails">记录: ${d.plant} (${d.date})</div>`
+    ).join('');
+    const archiveDup = result.duplicates.archive.slice(0, 3).map(d =>
+      `<div class="importIssueDetails">档案: ${d.nickname}</div>`
+    ).join('');
+    const goalDup = result.duplicates.goals.slice(0, 3).map(d =>
+      `<div class="importIssueDetails">目标: ${d.plantName}</div>`
+    ).join('');
+    const careDup = result.duplicates.care.slice(0, 3).map(d =>
+      `<div class="importIssueDetails">养护: ${d}</div>`
+    ).join('');
+
+    duplicateDetailsHtml = `
+      <div class="importIssueItem warning">
+        <span class="importIssueIcon">🔄</span>
+        <div class="importIssueContent">
+          <strong>重复记录详情（最多显示前3条/类型）</strong>
+          ${recordDup}
+          ${archiveDup}
+          ${goalDup}
+          ${careDup}
+        </div>
+      </div>
+    `;
+  }
+
+  let strategyHtml = '';
+  if (totalDuplicates > 0 && result.canImport) {
+    strategyHtml = `
+      <div class="importStrategySelector">
+        <label>请选择重复记录处理策略：</label>
+        <div class="importStrategyOptions">
+          <label class="importStrategyOption">
+            <input type="radio" name="importStrategy" value="skip" ${importStrategy === 'skip' ? 'checked' : ''} />
+            <div>
+              <div class="strategyLabel">⏭️ 跳过重复（推荐）</div>
+              <div class="strategyDesc">保留现有数据，只导入不重复的新记录</div>
+            </div>
+          </label>
+          <label class="importStrategyOption">
+            <input type="radio" name="importStrategy" value="overwrite" ${importStrategy === 'overwrite' ? 'checked' : ''} />
+            <div>
+              <div class="strategyLabel">🔄 覆盖现有</div>
+              <div class="strategyDesc">用导入的数据覆盖现有的重复记录</div>
+            </div>
+          </label>
+          <label class="importStrategyOption">
+            <input type="radio" name="importStrategy" value="duplicate" ${importStrategy === 'duplicate' ? 'checked' : ''} />
+            <div>
+              <div class="strategyLabel">➕ 全部作为新记录</div>
+              <div class="strategyDesc">重新生成ID，将所有导入数据作为新记录添加</div>
+            </div>
+          </label>
+        </div>
+      </div>
+    `;
+  }
+
+  importModalBody.innerHTML = `
+    <div class="importSummary">
+      ${fileInfoHtml}
+
+      <div class="importSummarySection">
+        <h4>📊 数据概览</h4>
+        <div class="importSummaryGrid">
+          <div class="importSummaryItem">
+            <span class="importSummaryLabel">生长记录</span>
+            <span class="importSummaryValue">${result.stats.records}</span>
+          </div>
+          <div class="importSummaryItem">
+            <span class="importSummaryLabel">植物档案</span>
+            <span class="importSummaryValue">${result.stats.archive}</span>
+          </div>
+          <div class="importSummaryItem">
+            <span class="importSummaryLabel">生长目标</span>
+            <span class="importSummaryValue">${result.stats.goals}</span>
+          </div>
+          <div class="importSummaryItem">
+            <span class="importSummaryLabel">养护完成</span>
+            <span class="importSummaryValue">${result.stats.careCompleted}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="importSummarySection">
+        <h4>🔍 导入分析</h4>
+        <div class="importSummaryGrid">
+          <div class="importSummaryItem success">
+            <span class="importSummaryLabel">新增记录</span>
+            <span class="importSummaryValue">${result.stats.newRecords + result.stats.newArchive + result.stats.newGoals + result.stats.newCare}</span>
+          </div>
+          <div class="importSummaryItem ${result.stats.duplicateRecords + result.stats.duplicateArchive + result.stats.duplicateGoals + result.stats.duplicateCare > 0 ? 'warning' : ''}">
+            <span class="importSummaryLabel">重复记录</span>
+            <span class="importSummaryValue">${result.stats.duplicateRecords + result.stats.duplicateArchive + result.stats.duplicateGoals + result.stats.duplicateCare}</span>
+          </div>
+          <div class="importSummaryItem ${result.stats.missingFields > 0 ? 'warning' : ''}">
+            <span class="importSummaryLabel">缺失字段</span>
+            <span class="importSummaryValue">${result.stats.missingFields}</span>
+          </div>
+          <div class="importSummaryItem ${result.errors.length > 0 ? 'danger' : 'success'}">
+            <span class="importSummaryLabel">导入状态</span>
+            <span class="importSummaryValue">${result.errors.length > 0 ? '❌' : '✅'}</span>
+          </div>
+        </div>
+      </div>
+
+      ${issuesHtml}
+      ${missingDetailsHtml}
+      ${duplicateDetailsHtml}
+      ${strategyHtml}
+    </div>
+  `;
+
+  importConfirmBtn.disabled = !result.canImport;
+
+  document.querySelectorAll('input[name="importStrategy"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      importStrategy = e.target.value;
+    });
+  });
+}
+
+function openImportModal() {
+  importModalVisible = true;
+  importModal.style.display = 'flex';
+  pendingImportData = null;
+  importValidationResult = null;
+  importStrategy = 'skip';
+  renderImportPreview();
+}
+
+function closeImportModal() {
+  importModalVisible = false;
+  importModal.style.display = 'none';
+  pendingImportData = null;
+  importValidationResult = null;
+  importFile.value = '';
+}
+
+function processImportFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      pendingImportData = data;
+      importValidationResult = validateImportData(data);
+      renderImportPreview();
+    } catch (err) {
+      pendingImportData = null;
+      importValidationResult = {
+        valid: false,
+        canImport: false,
+        errors: [{ type: 'danger', title: 'JSON解析失败', details: err.message }],
+        warnings: [],
+        info: [],
+        stats: { records: 0, archive: 0, goals: 0, careCompleted: 0, duplicateRecords: 0, duplicateArchive: 0, duplicateGoals: 0, duplicateCare: 0, missingFields: 0, newRecords: 0, newArchive: 0, newGoals: 0, newCare: 0 },
+        duplicates: { records: [], archive: [], goals: [], care: [] },
+        missing: { records: [], archive: [], goals: [] }
+      };
+      renderImportPreview();
+    }
+  };
+  reader.onerror = () => {
+    pendingImportData = null;
+    importValidationResult = {
+      valid: false,
+      canImport: false,
+      errors: [{ type: 'danger', title: '文件读取失败', details: '无法读取选中的文件' }],
+      warnings: [],
+      info: [],
+      stats: { records: 0, archive: 0, goals: 0, careCompleted: 0, duplicateRecords: 0, duplicateArchive: 0, duplicateGoals: 0, duplicateCare: 0, missingFields: 0, newRecords: 0, newArchive: 0, newGoals: 0, newCare: 0 },
+      duplicates: { records: [], archive: [], goals: [], care: [] },
+      missing: { records: [], archive: [], goals: [] }
+    };
+    renderImportPreview();
+  };
+  reader.readAsText(file);
+}
+
+function performImport() {
+  if (!pendingImportData || !importValidationResult || !importValidationResult.canImport) {
+    alert('无法导入：数据验证失败');
+    return;
+  }
+
+  const backup = {
+    records: [...records],
+    plantArchive: [...plantArchive],
+    plantGoals: [...plantGoals],
+    careCompleted: { ...careCompleted }
+  };
+
+  try {
+    const data = pendingImportData;
+    const result = importValidationResult;
+    const strategy = importStrategy;
+
+    const existingRecordIds = new Set(records.map(r => r.id));
+    const existingArchiveIds = new Set(plantArchive.map(p => p.id));
+    const existingGoalIds = new Set(plantGoals.map(g => g.id));
+    const existingCareKeys = new Set(Object.keys(careCompleted));
+
+    data.records.forEach(record => {
+      const hasId = record.id && existingRecordIds.has(record.id);
+      if (strategy === 'skip' && hasId) return;
+      if (strategy === 'overwrite' && hasId) {
+        records = records.map(r => r.id === record.id ? { ...record } : r);
+      } else if (strategy === 'duplicate' && hasId) {
+        records.unshift({ ...record, id: crypto.randomUUID() });
+      } else {
+        records.unshift({ ...record });
+      }
+    });
+
+    data.plantArchive.forEach(plant => {
+      const hasId = plant.id && existingArchiveIds.has(plant.id);
+      if (strategy === 'skip' && hasId) return;
+      if (strategy === 'overwrite' && hasId) {
+        plantArchive = plantArchive.map(p => p.id === plant.id ? { ...plant } : p);
+      } else if (strategy === 'duplicate' && hasId) {
+        plantArchive.push({ ...plant, id: crypto.randomUUID() });
+      } else {
+        const existsByNickname = plantArchive.find(p => p.nickname === plant.nickname);
+        if (!existsByNickname) {
+          plantArchive.push({ ...plant });
+        }
+      }
+    });
+
+    data.plantGoals.forEach(goal => {
+      const hasId = goal.id && existingGoalIds.has(goal.id);
+      if (strategy === 'skip' && hasId) return;
+      if (strategy === 'overwrite' && hasId) {
+        plantGoals = plantGoals.map(g => g.id === goal.id ? { ...goal } : g);
+      } else if (strategy === 'duplicate' && hasId) {
+        plantGoals.push({ ...goal, id: crypto.randomUUID() });
+      } else {
+        plantGoals.push({ ...goal });
+      }
+    });
+
+    Object.entries(data.careCompleted).forEach(([key, value]) => {
+      const hasKey = existingCareKeys.has(key);
+      if (strategy === 'skip' && hasKey) return;
+      if (strategy === 'duplicate') {
+        careCompleted[key] = value;
+      } else {
+        careCompleted[key] = value;
+      }
+    });
+
+    save();
+    saveArchive();
+    saveGoals();
+    saveCare();
+
+    alert(`导入成功！\n\n生长记录: ${result.stats.records} 条\n植物档案: ${result.stats.archive} 条\n生长目标: ${result.stats.goals} 条\n养护完成: ${result.stats.careCompleted} 项\n\n处理策略: ${strategy === 'skip' ? '跳过重复' : strategy === 'overwrite' ? '覆盖现有' : '全部作为新记录'}`);
+
+    closeImportModal();
+    render();
+  } catch (err) {
+    console.error('Import error:', err);
+
+    records = backup.records;
+    plantArchive = backup.plantArchive;
+    plantGoals = backup.plantGoals;
+    careCompleted = backup.careCompleted;
+
+    save();
+    saveArchive();
+    saveGoals();
+    saveCare();
+
+    alert(`导入失败，已回滚到之前的数据状态。\n\n错误信息: ${err.message}`);
+  }
 }
 
 function getPlantLatestRecord(plantName) {
@@ -957,6 +1541,28 @@ goalCancelBtn.addEventListener('click', closeGoalModal);
 goalModal.addEventListener('click', (e) => {
   if (e.target === goalModal) closeGoalModal();
 });
+
+exportBtn.addEventListener('click', exportData);
+
+importBtn.addEventListener('click', () => {
+  importFile.click();
+});
+
+importFile.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    openImportModal();
+    processImportFile(file);
+  }
+});
+
+importClose.addEventListener('click', closeImportModal);
+importCancelBtn.addEventListener('click', closeImportModal);
+importModal.addEventListener('click', (e) => {
+  if (e.target === importModal) closeImportModal();
+});
+
+importConfirmBtn.addEventListener('click', performImport);
 
 goalForm.addEventListener('submit', (event) => {
   event.preventDefault();
