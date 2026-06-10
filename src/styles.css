@@ -3002,3 +3002,419 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
     min-width: auto;
   }
 }
+
+.timelinePhotoContainer {
+  position: relative;
+  overflow: hidden;
+}
+
+.annBadge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(47, 133, 90, 0.95);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 2;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.annBadgeIcon {
+  font-size: 12px;
+}
+
+.recordAnnBadge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: rgba(47, 133, 90, 0.95);
+  color: white;
+  border-radius: 50%;
+  font-size: 10px;
+  z-index: 2;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.recordThumbWrap {
+  position: relative;
+}
+
+.annotationModal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 20px;
+}
+
+.annotationModalContent {
+  background: white;
+  border-radius: 12px;
+  max-width: 1200px;
+  width: 100%;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.annotationModalHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.annotationModalHead h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #1f2a22;
+}
+
+.annotationModalTools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.annToolBtn {
+  padding: 6px 12px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  background: white;
+  color: #4a5568;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.annToolBtn:hover {
+  background: #f7fafc;
+  border-color: #a0aec0;
+}
+
+.annToolBtn.active {
+  background: #2f855a;
+  color: white;
+  border-color: #2f855a;
+}
+
+.annPresetSelect {
+  padding: 6px 10px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  background: white;
+  color: #4a5568;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.annCloseBtn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  font-size: 24px;
+  color: #718096;
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.annCloseBtn:hover {
+  background: #e2e8f0;
+  color: #2d3748;
+}
+
+.annotationModalBody {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.annotationCanvasWrap {
+  flex: 1;
+  position: relative;
+  background: #1a202c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#annotationImage {
+  max-width: 100%;
+  max-height: 75vh;
+  object-fit: contain;
+  display: block;
+}
+
+.annotationOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  cursor: default;
+}
+
+.annRect {
+  position: absolute;
+  border: 2px solid;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: box-shadow 0.2s;
+}
+
+.annRect:hover {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+.annRect.editing {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.8), 0 0 12px rgba(0, 0, 0, 0.4);
+}
+
+.annRect.temp {
+  border-style: dashed;
+  pointer-events: none;
+}
+
+.annLabel {
+  position: absolute;
+  top: -22px;
+  left: -2px;
+  padding: 2px 8px;
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px 4px 0 0;
+  white-space: nowrap;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.annotationSidebar {
+  width: 280px;
+  border-left: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  background: #f8fafc;
+}
+
+.annotationSidebar h4 {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 14px;
+  color: #2d3748;
+  border-bottom: 1px solid #e2e8f0;
+  background: white;
+}
+
+.annotationList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.annEmpty {
+  padding: 20px;
+  text-align: center;
+  color: #a0aec0;
+  font-size: 13px;
+}
+
+.annListItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.annListItem:hover {
+  border-color: #a0aec0;
+  background: #f7fafc;
+}
+
+.annListItem.active {
+  border-color: #2f855a;
+  background: #f0fff4;
+}
+
+.annListItemColor {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.annListItemContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.annListItemText {
+  font-size: 13px;
+  color: #2d3748;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.annListItemMeta {
+  font-size: 11px;
+  color: #a0aec0;
+  margin-top: 2px;
+}
+
+.annotationEditor {
+  padding: 16px;
+  border-top: 1px solid #e2e8f0;
+  background: white;
+}
+
+.annotationEditor h4 {
+  margin: 0 0 12px 0;
+  padding: 0;
+  font-size: 14px;
+  color: #2d3748;
+  border-bottom: none;
+  background: transparent;
+}
+
+.annotationEditor label {
+  display: block;
+  font-size: 12px;
+  color: #718096;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.annotationEditor input[type="text"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.annColorPicker {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.annColorDot {
+  width: 24px;
+  height: 24px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.2s;
+}
+
+.annColorDot:hover {
+  transform: scale(1.1);
+}
+
+.annColorDot.active {
+  border-color: #2d3748;
+  box-shadow: 0 0 0 2px white, 0 0 0 4px #2d3748;
+}
+
+.annEditorActions {
+  display: flex;
+  gap: 8px;
+}
+
+.annEditorActions .primary {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.annDeleteBtn {
+  padding: 8px 12px;
+  border: 1px solid #fed7d7;
+  border-radius: 6px;
+  background: #fff5f5;
+  color: #c53030;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.annDeleteBtn:hover {
+  background: #fed7d7;
+}
+
+.annCancelBtn {
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+  color: #718096;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.annCancelBtn:hover {
+  background: #f7fafc;
+}
+
+@media (max-width: 768px) {
+  .annotationModalBody {
+    flex-direction: column;
+  }
+
+  .annotationSidebar {
+    width: 100%;
+    max-height: 200px;
+    border-left: none;
+    border-top: 1px solid #e2e8f0;
+  }
+
+  .annotationModalHead {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .annotationModalTools {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}

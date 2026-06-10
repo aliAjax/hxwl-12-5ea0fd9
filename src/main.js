@@ -8,8 +8,9 @@ const experimentsKey = 'hxwl-12-experiments';
 
 const LOCAL_IMAGE_PREFIX = 'local-image://';
 const DB_NAME = 'hxwl-12-photos';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'photos';
+const ANNOTATION_STORE_NAME = 'annotations';
 
 const PhotoStorage = {
   db: null,
@@ -24,10 +25,23 @@ const PhotoStorage = {
       };
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-          store.createIndex('recordId', 'recordId', { unique: false });
-          store.createIndex('createdAt', 'createdAt', { unique: false });
+        const oldVersion = event.oldVersion || 0;
+
+        if (oldVersion < 1) {
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+            store.createIndex('recordId', 'recordId', { unique: false });
+            store.createIndex('createdAt', 'createdAt', { unique: false });
+          }
+        }
+
+        if (oldVersion < 2) {
+          if (!db.objectStoreNames.contains(ANNOTATION_STORE_NAME)) {
+            const annStore = db.createObjectStore(ANNOTATION_STORE_NAME, { keyPath: 'id' });
+            annStore.createIndex('photoId', 'photoId', { unique: false });
+            annStore.createIndex('recordId', 'recordId', { unique: false });
+            annStore.createIndex('createdAt', 'createdAt', { unique: false });
+          }
         }
       };
     });
@@ -116,6 +130,137 @@ const PhotoStorage = {
       }
     }
     return deleted;
+  }
+};
+
+const AnnotationStorage = {
+  db: null,
+
+  async init() {
+    if (!PhotoStorage.db) await PhotoStorage.init();
+    this.db = PhotoStorage.db;
+  },
+
+  async save(annotation) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(ANNOTATION_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(ANNOTATION_STORE_NAME);
+      const data = {
+        id: annotation.id || crypto.randomUUID(),
+        photoId: annotation.photoId,
+        recordId: annotation.recordId,
+        type: annotation.type || 'rect',
+        x: annotation.x,
+        y: annotation.y,
+        width: annotation.width,
+        height: annotation.height,
+        text: annotation.text || '',
+        color: annotation.color || '#ef4444',
+        createdAt: annotation.createdAt || Date.now(),
+        updatedAt: Date.now()
+      };
+      const request = store.put(data);
+      request.onsuccess = () => resolve(data);
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  async get(id) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(ANNOTATION_STORE_NAME, 'readonly');
+      const store = transaction.objectStore(ANNOTATION_STORE_NAME);
+      const request = store.get(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  async delete(id) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(ANNOTATION_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(ANNOTATION_STORE_NAME);
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  async getByPhotoId(photoId) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(ANNOTATION_STORE_NAME, 'readonly');
+      const store = transaction.objectStore(ANNOTATION_STORE_NAME);
+      const index = store.index('photoId');
+      const request = index.getAll(IDBKeyRange.only(photoId));
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  async getByRecordId(recordId) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(ANNOTATION_STORE_NAME, 'readonly');
+      const store = transaction.objectStore(ANNOTATION_STORE_NAME);
+      const index = store.index('recordId');
+      const request = index.getAll(IDBKeyRange.only(recordId));
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  async deleteByPhotoId(photoId) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(ANNOTATION_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(ANNOTATION_STORE_NAME);
+      const index = store.index('photoId');
+      const request = index.openCursor(IDBKeyRange.only(photoId));
+      request.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        } else {
+          resolve();
+        }
+      };
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  async deleteByRecordId(recordId) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(ANNOTATION_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(ANNOTATION_STORE_NAME);
+      const index = store.index('recordId');
+      const request = index.openCursor(IDBKeyRange.only(recordId));
+      request.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        } else {
+          resolve();
+        }
+      };
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  async getAll() {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(ANNOTATION_STORE_NAME, 'readonly');
+      const store = transaction.objectStore(ANNOTATION_STORE_NAME);
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
   }
 };
 
@@ -280,9 +425,24 @@ PhotoStorage.init()
   .then(() => {
     return PhotoManager.cleanupOrphanedPhotos();
   })
-  .then(deleted => {
+  .then(async (deleted) => {
     if (deleted && deleted.length > 0) {
       console.log(`清理了 ${deleted.length} 张孤立照片`);
+    }
+    const activeRecordIds = new Set();
+    records.forEach(r => {
+      if (r.id) activeRecordIds.add(r.id);
+    });
+    const allAnns = await AnnotationStorage.getAll();
+    const deletedAnns = [];
+    for (const ann of allAnns) {
+      if (ann.recordId && !activeRecordIds.has(ann.recordId)) {
+        await AnnotationStorage.delete(ann.id);
+        deletedAnns.push(ann.id);
+      }
+    }
+    if (deletedAnns.length > 0) {
+      console.log(`清理了 ${deletedAnns.length} 个孤立标注`);
     }
   })
   .catch(err => console.warn('PhotoStorage init/cleanup failed:', err));
@@ -336,6 +496,18 @@ let experimentAlignMode = 'relative';
 let diagnosisFilterPlant = '';
 let diagnosisCache = null;
 let diagnosisCacheTime = 0;
+
+let annotationModalVisible = false;
+let annotationPhotoUrl = '';
+let annotationPhotoId = '';
+let annotationRecordId = '';
+let annotationCurrentTool = 'view';
+let annotationList = [];
+let annotationEditingId = null;
+let annotationDrawing = false;
+let annotationDrawStart = null;
+let annotationTempRect = null;
+let annotationSelectedColor = '#ef4444';
 
 document.querySelector('#app').innerHTML = `
   <main class="shell">
@@ -643,6 +815,57 @@ document.querySelector('#app').innerHTML = `
       </div>
     </div>
   </div>
+
+  <div class="annotationModal" id="annotationModal" style="display: none;">
+    <div class="annotationModalContent">
+      <div class="annotationModalHead">
+        <h3 id="annotationModalTitle">照片标注</h3>
+        <div class="annotationModalTools">
+          <button type="button" class="annToolBtn active" data-tool="view" title="查看模式">👁️ 查看</button>
+          <button type="button" class="annToolBtn" data-tool="rect" title="添加矩形标注">⬜ 矩形标注</button>
+          <select id="annPresetSelect" class="annPresetSelect">
+            <option value="">选择预设标签</option>
+            <option value="新芽" data-color="#22c55e">🌱 新芽</option>
+            <option value="黄叶" data-color="#eab308">🍂 黄叶</option>
+            <option value="修剪点" data-color="#f97316">✂️ 修剪点</option>
+            <option value="虫害" data-color="#ef4444">🐛 虫害</option>
+            <option value="病害" data-color="#8b5cf6">🦠 病害</option>
+            <option value="其他" data-color="#3b82f6">📝 其他</option>
+          </select>
+          <button type="button" class="annCloseBtn" id="annotationClose">&times;</button>
+        </div>
+      </div>
+      <div class="annotationModalBody">
+        <div class="annotationCanvasWrap" id="annotationCanvasWrap">
+          <img id="annotationImage" alt="标注照片" />
+          <div class="annotationOverlay" id="annotationOverlay"></div>
+        </div>
+        <div class="annotationSidebar">
+          <h4>标注列表</h4>
+          <div class="annotationList" id="annotationList"></div>
+          <div class="annotationEditor" id="annotationEditor" style="display: none;">
+            <h4>编辑标注</h4>
+            <label>标注文字</label>
+            <input type="text" id="annEditText" placeholder="输入标注说明" />
+            <label>标注颜色</label>
+            <div class="annColorPicker">
+              <button type="button" class="annColorDot active" data-color="#ef4444" style="background:#ef4444;"></button>
+              <button type="button" class="annColorDot" data-color="#f97316" style="background:#f97316;"></button>
+              <button type="button" class="annColorDot" data-color="#eab308" style="background:#eab308;"></button>
+              <button type="button" class="annColorDot" data-color="#22c55e" style="background:#22c55e;"></button>
+              <button type="button" class="annColorDot" data-color="#3b82f6" style="background:#3b82f6;"></button>
+              <button type="button" class="annColorDot" data-color="#8b5cf6" style="background:#8b5cf6;"></button>
+            </div>
+            <div class="annEditorActions">
+              <button type="button" class="primary" id="annSaveBtn">保存</button>
+              <button type="button" class="annDeleteBtn" id="annDeleteBtn">删除</button>
+              <button type="button" class="annCancelBtn" id="annCancelBtn">取消</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 `;
 
 const form = document.querySelector('#form');
@@ -695,6 +918,21 @@ const experimentAlignModeSelect = document.querySelector('#experimentAlignMode')
 
 const diagnosisPlantFilter = document.querySelector('#diagnosisPlantFilter');
 const diagnosisRefreshBtn = document.querySelector('#diagnosisRefresh');
+
+const annotationModal = document.querySelector('#annotationModal');
+const annotationClose = document.querySelector('#annotationClose');
+const annotationImage = document.querySelector('#annotationImage');
+const annotationOverlay = document.querySelector('#annotationOverlay');
+const annotationCanvasWrap = document.querySelector('#annotationCanvasWrap');
+const annotationListEl = document.querySelector('#annotationList');
+const annotationEditor = document.querySelector('#annotationEditor');
+const annEditText = document.querySelector('#annEditText');
+const annSaveBtn = document.querySelector('#annSaveBtn');
+const annDeleteBtn = document.querySelector('#annDeleteBtn');
+const annCancelBtn = document.querySelector('#annCancelBtn');
+const annToolBtns = document.querySelectorAll('.annToolBtn');
+const annPresetSelect = document.querySelector('#annPresetSelect');
+const annColorDots = document.querySelectorAll('.annColorDot');
 
 const photoFileInput = document.querySelector('#photoFileInput');
 const photoUploadArea = document.querySelector('#photoUploadArea');
@@ -3235,16 +3473,22 @@ function renderTimeline() {
               </div>
               ${hasPhoto ? `
                 <div class="timelinePhotoWrap">
-                  <img
-                    data-role="timeline-photo"
-                    data-photo="${record.photo}"
-                    data-record-id="${record.id}"
-                    data-record-date="${record.date}"
-                    data-record-plant="${timelinePlant}"
-                    alt="${timelinePlant} - ${record.date}"
-                    class="timelinePhoto timelinePhotoClickable ${isLocalPhoto ? 'timelinePhotoPending' : ''}"
-                  />
-                  <a href="#" class="photoLink" data-role="timeline-view-big" data-photo="${record.photo}">查看大图 ↗</a>
+                  <div class="timelinePhotoContainer">
+                    <img
+                      data-role="timeline-photo"
+                      data-photo="${record.photo}"
+                      data-record-id="${record.id}"
+                      data-record-date="${record.date}"
+                      data-record-plant="${timelinePlant}"
+                      alt="${timelinePlant} - ${record.date}"
+                      class="timelinePhoto timelinePhotoClickable ${isLocalPhoto ? 'timelinePhotoPending' : ''}"
+                    />
+                    <span class="annBadge" data-role="timeline-ann-badge" data-record-id="${record.id}" data-photo="${record.photo}" style="display:none;">
+                      <span class="annBadgeIcon">📍</span>
+                      <span class="annBadgeCount">0</span>
+                    </span>
+                  </div>
+                  <a href="#" class="photoLink" data-role="timeline-view-ann" data-photo="${record.photo}" data-record-id="${record.id}">📝 查看标注 ↗</a>
                 </div>
               ` : ''}
               <div class="timelineMeta">
@@ -3327,23 +3571,424 @@ function bindTimelinePhotoEvents() {
     });
   });
 
-  document.querySelectorAll('[data-role="timeline-view-big"]').forEach(link => {
+  document.querySelectorAll('[data-role="timeline-view-ann"]').forEach(link => {
     link.addEventListener('click', async (e) => {
       e.preventDefault();
       const photoUrl = link.dataset.photo;
+      const recordId = link.dataset.recordId;
       if (!photoUrl) return;
       try {
-        const resolvedUrl = await resolvePhotoUrl(photoUrl);
-        if (resolvedUrl) {
-          const w = window.open();
-          if (w) {
-            w.document.write(`<html><head><title>照片查看</title><style>body{margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;}img{max-width:100%;max-height:100vh;object-fit:contain;}</style></head><body><img src="${resolvedUrl}" alt="照片"/></body></html>`);
-          }
-        }
+        await openAnnotationModal(photoUrl, recordId);
       } catch (err) {
-        console.error('打开大图失败:', err);
+        console.error('打开标注失败:', err);
       }
     });
+  });
+
+  loadTimelineAnnotationBadges();
+}
+
+async function loadTimelineAnnotationBadges() {
+  const badges = document.querySelectorAll('[data-role="timeline-ann-badge"]');
+  for (const badge of badges) {
+    const photoUrl = badge.dataset.photo;
+    const recordId = badge.dataset.recordId;
+    if (!photoUrl) continue;
+
+    let count = 0;
+    try {
+      if (PhotoManager.isLocalImage(photoUrl)) {
+        const photoId = PhotoManager.getImageId(photoUrl);
+        if (photoId) {
+          const anns = await AnnotationStorage.getByPhotoId(photoId);
+          count = anns.length;
+        }
+      } else if (recordId) {
+        const anns = await AnnotationStorage.getByRecordId(recordId);
+        count = anns.length;
+      }
+    } catch (err) {
+      console.warn('加载标注数量失败:', err);
+    }
+
+    if (count > 0) {
+      badge.style.display = 'flex';
+      const countEl = badge.querySelector('.annBadgeCount');
+      if (countEl) countEl.textContent = count;
+    }
+  }
+}
+
+async function openAnnotationModal(photoUrl, recordId) {
+  if (!photoUrl) return;
+
+  annotationPhotoUrl = photoUrl;
+  annotationRecordId = recordId || '';
+  annotationPhotoId = '';
+
+  if (PhotoManager.isLocalImage(photoUrl)) {
+    annotationPhotoId = PhotoManager.getImageId(photoUrl);
+  }
+
+  try {
+    const resolvedUrl = await resolvePhotoUrl(photoUrl);
+    if (!resolvedUrl) return;
+
+    annotationImage.src = resolvedUrl;
+    annotationImage.onload = async () => {
+      if (annotationPhotoId) {
+        annotationList = await AnnotationStorage.getByPhotoId(annotationPhotoId);
+      } else {
+        annotationList = [];
+      }
+      renderAnnotations();
+      renderAnnotationList();
+    };
+
+    annotationModalVisible = true;
+    annotationModal.style.display = 'flex';
+    annotationCurrentTool = 'view';
+    updateAnnotationToolButtons();
+    annotationEditor.style.display = 'none';
+    annotationEditingId = null;
+  } catch (err) {
+    console.error('打开标注模态框失败:', err);
+  }
+}
+
+function closeAnnotationModal() {
+  annotationModalVisible = false;
+  annotationModal.style.display = 'none';
+  annotationList = [];
+  annotationEditingId = null;
+  annotationDrawing = false;
+  annotationTempRect = null;
+}
+
+function updateAnnotationToolButtons() {
+  annToolBtns.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tool === annotationCurrentTool);
+  });
+  annotationOverlay.style.cursor = annotationCurrentTool === 'rect' ? 'crosshair' : 'default';
+}
+
+function renderAnnotations() {
+  const img = annotationImage;
+  const wrap = annotationCanvasWrap;
+  if (!img || !img.naturalWidth || !img.naturalHeight) return;
+
+  const wrapRect = wrap.getBoundingClientRect();
+  const imgRect = img.getBoundingClientRect();
+
+  const scaleX = imgRect.width / img.naturalWidth;
+  const scaleY = imgRect.height / img.naturalHeight;
+
+  const offsetLeft = imgRect.left - wrapRect.left;
+  const offsetTop = imgRect.top - wrapRect.top;
+
+  let html = '';
+
+  annotationList.forEach((ann) => {
+    const x = offsetLeft + ann.x * img.naturalWidth * scaleX;
+    const y = offsetTop + ann.y * img.naturalHeight * scaleY;
+    const w = ann.width * img.naturalWidth * scaleX;
+    const h = ann.height * img.naturalHeight * scaleY;
+
+    html += `
+      <div class="annRect ${annotationEditingId === ann.id ? 'editing' : ''}" 
+           data-ann-id="${ann.id}"
+           style="left:${x}px; top:${y}px; width:${w}px; height:${h}px; border-color:${ann.color};">
+        <div class="annLabel" style="background:${ann.color};">${ann.text || '标注'}</div>
+      </div>
+    `;
+  });
+
+  if (annotationTempRect) {
+    const x = offsetLeft + annotationTempRect.x * img.naturalWidth * scaleX;
+    const y = offsetTop + annotationTempRect.y * img.naturalHeight * scaleY;
+    const w = annotationTempRect.width * img.naturalWidth * scaleX;
+    const h = annotationTempRect.height * img.naturalHeight * scaleY;
+    html += `
+      <div class="annRect temp" 
+           style="left:${Math.min(x, x + w)}px; top:${Math.min(y, y + h)}px; width:${Math.abs(w)}px; height:${Math.abs(h)}px; border-color:${annotationSelectedColor};">
+      </div>
+    `;
+  }
+
+  annotationOverlay.innerHTML = html;
+
+  annotationOverlay.querySelectorAll('.annRect[data-ann-id]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const annId = el.dataset.annId;
+      if (annotationCurrentTool === 'view') {
+        editAnnotation(annId);
+      }
+    });
+  });
+}
+
+function renderAnnotationList() {
+  if (annotationList.length === 0) {
+    annotationListEl.innerHTML = '<div class="annEmpty">暂无标注，切换到「矩形标注」模式添加</div>';
+    return;
+  }
+
+  annotationListEl.innerHTML = annotationList.map((ann, idx) => `
+    <div class="annListItem ${annotationEditingId === ann.id ? 'active' : ''}" data-ann-id="${ann.id}">
+      <div class="annListItemColor" style="background:${ann.color};"></div>
+      <div class="annListItemContent">
+        <div class="annListItemText">${ann.text || '未命名标注'}</div>
+        <div class="annListItemMeta">#${idx + 1} · ${ann.type === 'rect' ? '矩形' : ann.type}</div>
+      </div>
+    </div>
+  `).join('');
+
+  annotationListEl.querySelectorAll('.annListItem').forEach(el => {
+    el.addEventListener('click', () => {
+      editAnnotation(el.dataset.annId);
+    });
+  });
+}
+
+function editAnnotation(annId) {
+  const ann = annotationList.find(a => a.id === annId);
+  if (!ann) return;
+
+  annotationEditingId = annId;
+  annEditText.value = ann.text || '';
+  annotationSelectedColor = ann.color || '#ef4444';
+
+  annColorDots.forEach(dot => {
+    dot.classList.toggle('active', dot.dataset.color === annotationSelectedColor);
+  });
+
+  annotationEditor.style.display = 'block';
+  renderAnnotations();
+}
+
+function cancelEditAnnotation() {
+  annotationEditingId = null;
+  annotationEditor.style.display = 'none';
+  renderAnnotations();
+}
+
+async function saveCurrentAnnotation() {
+  if (!annotationEditingId) return;
+
+  const ann = annotationList.find(a => a.id === annotationEditingId);
+  if (!ann) return;
+
+  ann.text = annEditText.value.trim();
+  ann.color = annotationSelectedColor;
+
+  try {
+    const saved = await AnnotationStorage.save(ann);
+    annotationList = annotationList.map(a => a.id === saved.id ? saved : a);
+    cancelEditAnnotation();
+    renderAnnotations();
+    renderAnnotationList();
+  } catch (err) {
+    console.error('保存标注失败:', err);
+  }
+}
+
+async function deleteCurrentAnnotation() {
+  if (!annotationEditingId) return;
+
+  if (!confirm('确定要删除这个标注吗？')) return;
+
+  try {
+    await AnnotationStorage.delete(annotationEditingId);
+    annotationList = annotationList.filter(a => a.id !== annotationEditingId);
+    cancelEditAnnotation();
+    renderAnnotations();
+    renderAnnotationList();
+  } catch (err) {
+    console.error('删除标注失败:', err);
+  }
+}
+
+function getImageRelativeCoords(e) {
+  const img = annotationImage;
+  const wrap = annotationCanvasWrap;
+  if (!img || !img.naturalWidth || !img.naturalHeight) return null;
+
+  const wrapRect = wrap.getBoundingClientRect();
+  const imgRect = img.getBoundingClientRect();
+
+  const clickX = e.clientX - imgRect.left;
+  const clickY = e.clientY - imgRect.top;
+
+  const relX = Math.max(0, Math.min(1, clickX / imgRect.width));
+  const relY = Math.max(0, Math.min(1, clickY / imgRect.height));
+
+  return { x: relX, y: relY };
+}
+
+function startAnnotationDraw(e) {
+  if (annotationCurrentTool !== 'rect') return;
+  if (e.target !== annotationOverlay) return;
+
+  const coords = getImageRelativeCoords(e);
+  if (!coords) return;
+
+  annotationDrawing = true;
+  annotationDrawStart = coords;
+  annotationTempRect = {
+    x: coords.x,
+    y: coords.y,
+    width: 0,
+    height: 0
+  };
+  renderAnnotations();
+}
+
+function moveAnnotationDraw(e) {
+  if (!annotationDrawing || !annotationTempRect) return;
+
+  const coords = getImageRelativeCoords(e);
+  if (!coords) return;
+
+  annotationTempRect.width = coords.x - annotationDrawStart.x;
+  annotationTempRect.height = coords.y - annotationDrawStart.y;
+  renderAnnotations();
+}
+
+async function endAnnotationDraw(e) {
+  if (!annotationDrawing || !annotationTempRect) return;
+
+  annotationDrawing = false;
+
+  const w = Math.abs(annotationTempRect.width);
+  const h = Math.abs(annotationTempRect.height);
+
+  if (w < 0.02 || h < 0.02) {
+    annotationTempRect = null;
+    renderAnnotations();
+    return;
+  }
+
+  const x = Math.min(annotationDrawStart.x, annotationDrawStart.x + annotationTempRect.width);
+  const y = Math.min(annotationDrawStart.y, annotationDrawStart.y + annotationTempRect.height);
+
+  const preset = annPresetSelect.value;
+  const presetOption = annPresetSelect.selectedOptions[0];
+  const presetColor = presetOption ? presetOption.dataset.color : null;
+
+  const newAnn = {
+    id: crypto.randomUUID(),
+    photoId: annotationPhotoId,
+    recordId: annotationRecordId,
+    type: 'rect',
+    x: x,
+    y: y,
+    width: w,
+    height: h,
+    text: preset || '',
+    color: presetColor || annotationSelectedColor,
+    createdAt: Date.now()
+  };
+
+  try {
+    if (annotationPhotoId) {
+      const saved = await AnnotationStorage.save(newAnn);
+      annotationList.push(saved);
+    } else {
+      annotationList.push(newAnn);
+    }
+
+    annotationEditingId = newAnn.id;
+    annotationTempRect = null;
+
+    renderAnnotations();
+    renderAnnotationList();
+
+    if (annotationPhotoId) {
+      editAnnotation(newAnn.id);
+    }
+  } catch (err) {
+    console.error('创建标注失败:', err);
+    annotationTempRect = null;
+    renderAnnotations();
+  }
+}
+
+function setAnnotationTool(tool) {
+  annotationCurrentTool = tool;
+  updateAnnotationToolButtons();
+  cancelEditAnnotation();
+}
+
+function setAnnotationColor(color) {
+  annotationSelectedColor = color;
+  annColorDots.forEach(dot => {
+    dot.classList.toggle('active', dot.dataset.color === color);
+  });
+}
+
+function initAnnotationEvents() {
+  annotationClose.addEventListener('click', closeAnnotationModal);
+
+  annotationModal.addEventListener('click', (e) => {
+    if (e.target === annotationModal) {
+      closeAnnotationModal();
+    }
+  });
+
+  annToolBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      setAnnotationTool(btn.dataset.tool);
+    });
+  });
+
+  annPresetSelect.addEventListener('change', () => {
+    const selected = annPresetSelect.selectedOptions[0];
+    if (selected && selected.dataset.color) {
+      setAnnotationColor(selected.dataset.color);
+    }
+  });
+
+  annColorDots.forEach(dot => {
+    dot.addEventListener('click', () => {
+      setAnnotationColor(dot.dataset.color);
+    });
+  });
+
+  annotationOverlay.addEventListener('mousedown', startAnnotationDraw);
+  annotationOverlay.addEventListener('mousemove', moveAnnotationDraw);
+  document.addEventListener('mouseup', endAnnotationDraw);
+
+  annotationOverlay.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      startAnnotationDraw({ clientX: touch.clientX, clientY: touch.clientY, target: e.target });
+    }
+  });
+  annotationOverlay.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      moveAnnotationDraw({ clientX: touch.clientX, clientY: touch.clientY });
+    }
+  });
+  annotationOverlay.addEventListener('touchend', (e) => {
+    endAnnotationDraw({});
+  });
+
+  annSaveBtn.addEventListener('click', saveCurrentAnnotation);
+  annDeleteBtn.addEventListener('click', deleteCurrentAnnotation);
+  annCancelBtn.addEventListener('click', cancelEditAnnotation);
+
+  window.addEventListener('resize', () => {
+    if (annotationModalVisible) {
+      renderAnnotations();
+    }
+  });
+
+  annotationImage.addEventListener('load', () => {
+    if (annotationModalVisible) {
+      renderAnnotations();
+    }
   });
 }
 
@@ -3866,26 +4511,46 @@ function bindRecordPhotoLinks() {
     link.addEventListener('click', async (e) => {
       e.preventDefault();
       const photoUrl = link.dataset.photoLink;
+      const recordId = link.dataset.recordId;
       if (!photoUrl) return;
       try {
-        if (PhotoManager.isLocalImage(photoUrl)) {
-          const fullUrl = await PhotoManager.getImageUrl(photoUrl);
-          if (fullUrl) {
-            const w = window.open();
-            if (w) {
-              w.document.write(`<html><head><title>照片查看</title><style>body{margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;}img{max-width:100%;max-height:100vh;object-fit:contain;}</style></head><body><img src="${fullUrl}" alt="照片"/></body></html>`);
-            }
-          } else {
-            alert('照片数据丢失或损坏');
-          }
-        } else {
-          window.open(photoUrl, '_blank');
-        }
+        await openAnnotationModal(photoUrl, recordId);
       } catch (err) {
         console.error('打开照片失败:', err);
       }
     });
   });
+
+  loadRecordAnnotationBadges();
+}
+
+async function loadRecordAnnotationBadges() {
+  const badges = document.querySelectorAll('[data-role="record-ann-badge"]');
+  for (const badge of badges) {
+    const photoUrl = badge.dataset.photo;
+    const recordId = badge.dataset.recordId;
+    if (!photoUrl) continue;
+
+    let count = 0;
+    try {
+      if (PhotoManager.isLocalImage(photoUrl)) {
+        const photoId = PhotoManager.getImageId(photoUrl);
+        if (photoId) {
+          const anns = await AnnotationStorage.getByPhotoId(photoId);
+          count = anns.length;
+        }
+      } else if (recordId) {
+        const anns = await AnnotationStorage.getByRecordId(recordId);
+        count = anns.length;
+      }
+    } catch (err) {
+      console.warn('加载标注数量失败:', err);
+    }
+
+    if (count > 0) {
+      badge.style.display = 'flex';
+    }
+  }
 }
 
 async function resolvePhotoUrl(photoUrl) {
@@ -3989,8 +4654,12 @@ function render() {
                 class="recordThumb ${isLocal ? 'recordThumbPending' : ''}"
                 data-photo="${record.photo}"
                 data-role="record-thumb"
+                data-record-id="${record.id}"
                 alt="缩略图"
               />
+              <span class="recordAnnBadge" data-role="record-ann-badge" data-record-id="${record.id}" data-photo="${record.photo}" style="display:none;">
+                📍
+              </span>
             </div>
           ` : ''}
           <div class="recordContent">
@@ -4000,7 +4669,7 @@ function render() {
           </div>
         </div>
         <div class="recordPhotoLink">
-          ${hasPhoto ? `<a href="#" data-photo-link="${record.photo}" data-role="record-photo-link">${isLocal ? '📷 本地照片' : '🔗 照片链接'}</a>` : '<span class="muted">无照片</span>'}
+          ${hasPhoto ? `<a href="#" data-photo-link="${record.photo}" data-role="record-photo-link" data-record-id="${record.id}">📝 照片标注</a>` : '<span class="muted">无照片</span>'}
         </div>
         <div><button data-edit="${record.id}">编辑</button><button data-del="${record.id}">删除</button></div>
       </article>
@@ -4019,6 +4688,11 @@ function render() {
       } catch (err) {
         console.warn('删除关联图片失败:', err);
       }
+    }
+    try {
+      await AnnotationStorage.deleteByRecordId(recordId);
+    } catch (err) {
+      console.warn('删除关联标注失败:', err);
     }
     records = records.filter((r) => r.id !== recordId);
     save();
@@ -4674,5 +5348,7 @@ diagnosisRefreshBtn.addEventListener('click', () => {
   clearDiagnosisCache();
   renderDiagnosis();
 });
+
+initAnnotationEvents();
 
 render();
