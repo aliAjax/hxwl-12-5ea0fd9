@@ -1659,6 +1659,7 @@ function performImport() {
     saveGoals();
     saveCare();
     saveExperiments();
+    clearDiagnosisCache();
 
     const totalBlocked = result.stats.blockedRecords + result.stats.blockedArchive + result.stats.blockedGoals + result.stats.blockedExperiments;
     const totalFileInternalDuplicates = result.stats.fileInternalDuplicateRecords + result.stats.fileInternalDuplicateArchive + result.stats.fileInternalDuplicateGoals + result.stats.fileInternalDuplicateCare + result.stats.fileInternalDuplicateExperiments;
@@ -1701,6 +1702,7 @@ function performImport() {
     saveGoals();
     saveCare();
     saveExperiments();
+    clearDiagnosisCache();
 
     alert(`导入失败，已回滚到之前的数据状态。\n\n错误信息: ${err.message}`);
   }
@@ -2835,6 +2837,7 @@ search.addEventListener('input', render);
 document.querySelector('#sample').addEventListener('click', () => {
   records = seed;
   save();
+  clearDiagnosisCache();
   render();
 });
 
@@ -3955,6 +3958,7 @@ function drawMultiBars(selector, data) {
 
 const DIAGNOSIS_CONFIG = {
   minRecords: 3,
+  minDaysSpan: 7,
   cacheTTL: 5 * 60 * 1000,
   normalGrowthRate: {
     height: 0.15,
@@ -3978,19 +3982,14 @@ const DIAGNOSIS_RULES = [
       if (plantRecords.length < 3) return null;
 
       const recent = plantRecords.slice(-3);
-      const heightChanges = [];
-      const leavesChanges = [];
-
-      for (let i = 1; i < recent.length; i++) {
-        heightChanges.push(recent[i].height - recent[i - 1].height);
-        leavesChanges.push(recent[i].leaves - recent[i - 1].leaves);
-      }
-
-      const avgHeightChange = heightChanges.reduce((a, b) => a + b, 0) / heightChanges.length;
-      const avgLeavesChange = leavesChanges.reduce((a, b) => a + b, 0) / leavesChanges.length;
       const totalDays = daysBetween(recent[0].date, recent[recent.length - 1].date) || 1;
-      const dailyHeightRate = avgHeightChange / totalDays;
-      const dailyLeavesRate = avgLeavesChange / totalDays;
+
+      if (totalDays < DIAGNOSIS_CONFIG.minDaysSpan) return null;
+
+      const totalHeightChange = recent[recent.length - 1].height - recent[0].height;
+      const totalLeavesChange = recent[recent.length - 1].leaves - recent[0].leaves;
+      const dailyHeightRate = totalHeightChange / totalDays;
+      const dailyLeavesRate = totalLeavesChange / totalDays;
 
       const isStagnant = dailyHeightRate < DIAGNOSIS_CONFIG.normalGrowthRate.height * 0.3 &&
                          dailyLeavesRate < DIAGNOSIS_CONFIG.normalGrowthRate.leaves * 0.3;
@@ -4001,9 +4000,9 @@ const DIAGNOSIS_RULES = [
         triggered: true,
         severity: 'high',
         reason: `最近${totalDays}天内，${recent[0].plant}的生长速度明显低于正常水平。`,
-        evidence: `高度日均增长仅 ${dailyHeightRate.toFixed(2)}cm（正常约 ${DIAGNOSIS_CONFIG.normalGrowthRate.height}cm/天），` +
-                  `叶片日均增长仅 ${dailyLeavesRate.toFixed(2)}片（正常约 ${DIAGNOSIS_CONFIG.normalGrowthRate.leaves}片/天）。\n` +
-                  `详细数据：${recent.map(r => `${r.date}: ${r.height}cm/${r.leaves}片`).join(' → ')}`,
+        evidence: `高度从 ${recent[0].height}cm 增长到 ${recent[recent.length - 1].height}cm，日均增长仅 ${dailyHeightRate.toFixed(2)}cm（正常约 ${DIAGNOSIS_CONFIG.normalGrowthRate.height}cm/天）\n` +
+                  `叶片从 ${recent[0].leaves} 片增长到 ${recent[recent.length - 1].leaves} 片，日均增长仅 ${dailyLeavesRate.toFixed(2)}片（正常约 ${DIAGNOSIS_CONFIG.normalGrowthRate.leaves}片/天）\n` +
+                  `时间跨度：${recent[0].date} ~ ${recent[recent.length - 1].date}（共 ${totalDays} 天）`,
         suggestion: '建议检查光照、浇水和温度条件，确保植物处于适宜的生长环境。可以考虑适当增加光照时间或调整浇水量。'
       };
     }
@@ -4017,8 +4016,11 @@ const DIAGNOSIS_RULES = [
       if (plantRecords.length < 3) return null;
 
       const recent = plantRecords.slice(-3);
-      const avgWater = recent.reduce((sum, r) => sum + r.water, 0) / recent.length;
       const totalDays = daysBetween(recent[0].date, recent[recent.length - 1].date) || 1;
+
+      if (totalDays < DIAGNOSIS_CONFIG.minDaysSpan) return null;
+
+      const avgWater = recent.reduce((sum, r) => sum + r.water, 0) / recent.length;
 
       const heightChange = recent[recent.length - 1].height - recent[0].height;
       const dailyGrowth = heightChange / totalDays;
@@ -4048,8 +4050,11 @@ const DIAGNOSIS_RULES = [
       if (plantRecords.length < 3) return null;
 
       const recent = plantRecords.slice(-3);
-      const avgWater = recent.reduce((sum, r) => sum + r.water, 0) / recent.length;
       const totalDays = daysBetween(recent[0].date, recent[recent.length - 1].date) || 1;
+
+      if (totalDays < DIAGNOSIS_CONFIG.minDaysSpan) return null;
+
+      const avgWater = recent.reduce((sum, r) => sum + r.water, 0) / recent.length;
 
       const heightChange = recent[recent.length - 1].height - recent[0].height;
       const dailyGrowth = heightChange / totalDays;
@@ -4079,8 +4084,11 @@ const DIAGNOSIS_RULES = [
       if (plantRecords.length < 3) return null;
 
       const recent = plantRecords.slice(-3);
-      const avgLight = recent.reduce((sum, r) => sum + r.light, 0) / recent.length;
       const totalDays = daysBetween(recent[0].date, recent[recent.length - 1].date) || 1;
+
+      if (totalDays < DIAGNOSIS_CONFIG.minDaysSpan) return null;
+
+      const avgLight = recent.reduce((sum, r) => sum + r.light, 0) / recent.length;
 
       const leavesChange = recent[recent.length - 1].leaves - recent[0].leaves;
       const dailyLeavesGrowth = leavesChange / totalDays;
