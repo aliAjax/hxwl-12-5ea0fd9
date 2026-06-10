@@ -6,6 +6,286 @@ const archiveKey = 'hxwl-12-plant-archive';
 const goalsKey = 'hxwl-12-plant-goals';
 const experimentsKey = 'hxwl-12-experiments';
 
+const LOCAL_IMAGE_PREFIX = 'local-image://';
+const DB_NAME = 'hxwl-12-photos';
+const DB_VERSION = 1;
+const STORE_NAME = 'photos';
+
+const PhotoStorage = {
+  db: null,
+
+  async init() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        this.db = request.result;
+        resolve(this.db);
+      };
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+          store.createIndex('recordId', 'recordId', { unique: false });
+          store.createIndex('createdAt', 'createdAt', { unique: false });
+        }
+      };
+    });
+  },
+
+  async save(photoData) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.put({
+        id: photoData.id,
+        recordId: photoData.recordId,
+        data: photoData.data,
+        thumbnail: photoData.thumbnail,
+        type: photoData.type,
+        size: photoData.size,
+        createdAt: photoData.createdAt || Date.now()
+      });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  async get(id) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  async delete(id) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  async deleteByRecordId(recordId) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const index = store.index('recordId');
+      const request = index.openCursor(IDBKeyRange.only(recordId));
+      request.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        } else {
+          resolve();
+        }
+      };
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  async getAll() {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  },
+
+  async clearOrphanedPhotos(activeRecordIds) {
+    const allPhotos = await this.getAll();
+    const activeIds = new Set(activeRecordIds);
+    const deleted = [];
+    for (const photo of allPhotos) {
+      if (photo.recordId && !activeIds.has(photo.recordId)) {
+        await this.delete(photo.id);
+        deleted.push(photo.id);
+      }
+    }
+    return deleted;
+  }
+};
+
+const ImageCompressor = {
+  async compress(file, options = {}) {
+    const {
+      maxWidth = 1200,
+      maxHeight = 1200,
+      quality = 0.8,
+      thumbnailMaxWidth = 200,
+      thumbnailMaxHeight = 200,
+      thumbnailQuality = 0.7
+    } = options;
+
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const thumbCanvas = document.createElement('canvas');
+
+          let { width, height } = img;
+          if (width > maxWidth || height > maxHeight) {
+            const ratio = Math.min(maxWidth / width, maxHeight / height);
+            width = Math.round(width * ratio);
+            height = Math.round(height * ratio);
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedData = canvas.toDataURL('image/jpeg', quality);
+
+          let thumbWidth = img.width;
+          let thumbHeight = img.height;
+          if (thumbWidth > thumbnailMaxWidth || thumbHeight > thumbnailMaxHeight) {
+            const thumbRatio = Math.min(thumbnailMaxWidth / thumbWidth, thumbnailMaxHeight / thumbHeight);
+            thumbWidth = Math.round(thumbWidth * thumbRatio);
+            thumbHeight = Math.round(thumbHeight * thumbRatio);
+          }
+
+          thumbCanvas.width = thumbWidth;
+          thumbCanvas.height = thumbHeight;
+          const thumbCtx = thumbCanvas.getContext('2d');
+          thumbCtx.drawImage(img, 0, 0, thumbWidth, thumbHeight);
+          const thumbnailData = thumbCanvas.toDataURL('image/jpeg', thumbnailQuality);
+
+          const originalSize = file.size;
+          const compressedSize = Math.round((compressedData.length - 'data:image/jpeg;base64,'.length) * 0.75);
+
+          resolve({
+            data: compressedData,
+            thumbnail: thumbnailData,
+            type: 'image/jpeg',
+            originalSize,
+            compressedSize,
+            compressionRatio: ((1 - compressedSize / originalSize) * 100).toFixed(1)
+          });
+        };
+        img.onerror = reject;
+        img.src = e.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+};
+
+const PhotoManager = {
+  isLocalImage(photoUrl) {
+    return photoUrl && photoUrl.startsWith(LOCAL_IMAGE_PREFIX);
+  },
+
+  getImageId(photoUrl) {
+    if (this.isLocalImage(photoUrl)) {
+      return photoUrl.slice(LOCAL_IMAGE_PREFIX.length);
+    }
+    return null;
+  },
+
+  buildLocalUrl(imageId) {
+    return `${LOCAL_IMAGE_PREFIX}${imageId}`;
+  },
+
+  async getImageUrl(photoUrl) {
+    if (!photoUrl) return null;
+    if (!this.isLocalImage(photoUrl)) return photoUrl;
+
+    const imageId = this.getImageId(photoUrl);
+    const photo = await PhotoStorage.get(imageId);
+    if (photo) {
+      return photo.data;
+    }
+    return null;
+  },
+
+  async getThumbnailUrl(photoUrl) {
+    if (!photoUrl) return null;
+    if (!this.isLocalImage(photoUrl)) return photoUrl;
+
+    const imageId = this.getImageId(photoUrl);
+    const photo = await PhotoStorage.get(imageId);
+    if (photo) {
+      return photo.thumbnail || photo.data;
+    }
+    return null;
+  },
+
+  async handleFileUpload(file, recordId) {
+    if (!file || !file.type.startsWith('image/')) {
+      throw new Error('请选择图片文件');
+    }
+
+    const compressed = await ImageCompressor.compress(file);
+    const imageId = crypto.randomUUID();
+
+    await PhotoStorage.save({
+      id: imageId,
+      recordId: recordId,
+      data: compressed.data,
+      thumbnail: compressed.thumbnail,
+      type: compressed.type,
+      size: compressed.compressedSize,
+      createdAt: Date.now()
+    });
+
+    return {
+      url: this.buildLocalUrl(imageId),
+      imageId,
+      ...compressed
+    };
+  },
+
+  async deleteByPhotoUrl(photoUrl) {
+    if (this.isLocalImage(photoUrl)) {
+      const imageId = this.getImageId(photoUrl);
+      if (imageId) {
+        await PhotoStorage.delete(imageId);
+      }
+    }
+  },
+
+  async deleteByRecordId(recordId) {
+    await PhotoStorage.deleteByRecordId(recordId);
+  },
+
+  async cleanupOrphanedPhotos() {
+    const activeRecordIds = new Set();
+    records.forEach(r => {
+      if (r.id) activeRecordIds.add(r.id);
+    });
+    return await PhotoStorage.clearOrphanedPhotos(activeRecordIds);
+  }
+};
+
+let pendingPhotoUpload = null;
+
+PhotoStorage.init()
+  .then(() => {
+    return PhotoManager.cleanupOrphanedPhotos();
+  })
+  .then(deleted => {
+    if (deleted && deleted.length > 0) {
+      console.log(`清理了 ${deleted.length} 张孤立照片`);
+    }
+  })
+  .catch(err => console.warn('PhotoStorage init/cleanup failed:', err));
+
 const seed = [
   { id: crypto.randomUUID(), plant: '窗台薄荷', date: '2026-06-01', height: 12, leaves: 18, water: 80, light: 5.5, photo: 'https://images.unsplash.com/photo-1628556270448-4d4e4148e1b1?auto=format&fit=crop&w=600&q=80', state: '新叶展开，长势良好' },
   { id: crypto.randomUUID(), plant: '窗台薄荷', date: '2026-06-03', height: 13.4, leaves: 22, water: 60, light: 4.8, photo: 'https://images.unsplash.com/photo-1598437279683-6384d16c32cc?auto=format&fit=crop&w=600&q=80', state: '叶色稳定，边缘锯齿清晰' },
@@ -104,7 +384,30 @@ document.querySelector('#app').innerHTML = `
           <input name="water" type="number" min="0" step="1" placeholder="浇水ml" required />
           <input name="light" type="number" min="0" step="0.1" placeholder="光照h" required />
         </div>
-        <input name="photo" placeholder="状态照片链接" />
+        <div class="photoUploadSection">
+          <div class="photoUploadTabs">
+            <button type="button" class="photoTab active" data-tab="upload">📷 上传照片</button>
+            <button type="button" class="photoTab" data-tab="url">🔗 照片链接</button>
+          </div>
+          <div class="photoTabContent" data-tab-content="upload">
+            <div class="photoUploadArea" id="photoUploadArea">
+              <input type="file" id="photoFileInput" accept="image/*" style="display: none;" />
+              <div class="photoUploadPlaceholder">
+                <div class="uploadIcon">📸</div>
+                <p>点击或拖拽图片到此处上传</p>
+                <span class="uploadHint">支持 JPG、PNG、WebP 格式，将自动压缩</span>
+              </div>
+              <div class="photoPreviewContainer" id="photoPreviewContainer" style="display: none;">
+                <img id="photoPreview" alt="预览" />
+                <div class="photoPreviewInfo" id="photoPreviewInfo"></div>
+                <button type="button" class="photoRemoveBtn" id="photoRemoveBtn">× 移除</button>
+              </div>
+            </div>
+          </div>
+          <div class="photoTabContent" data-tab-content="url" style="display: none;">
+            <input name="photo" id="photoUrlInput" placeholder="粘贴状态照片链接" />
+          </div>
+        </div>
         <textarea name="state" placeholder="状态描述" required></textarea>
         <div id="plantNotesHint" class="plantNotesHint" style="display: none;"></div>
         <button class="primary">保存记录</button>
@@ -336,6 +639,18 @@ const experimentBackBtn = document.querySelector('#experimentBackBtn');
 const experimentViewInfo = document.querySelector('#experimentViewInfo');
 const experimentCharts = document.querySelector('#experimentCharts');
 const experimentAlignModeSelect = document.querySelector('#experimentAlignMode');
+
+const photoFileInput = document.querySelector('#photoFileInput');
+const photoUploadArea = document.querySelector('#photoUploadArea');
+const photoPreviewContainer = document.querySelector('#photoPreviewContainer');
+const photoPreview = document.querySelector('#photoPreview');
+const photoPreviewInfo = document.querySelector('#photoPreviewInfo');
+const photoRemoveBtn = document.querySelector('#photoRemoveBtn');
+const photoUrlInput = document.querySelector('#photoUrlInput');
+const photoTabs = document.querySelectorAll('.photoTab');
+const photoTabContents = document.querySelectorAll('.photoTabContent');
+
+let currentPhotoTab = 'upload';
 
 const EXPERIMENT_COLORS = ['#2f855a', '#7c3aed', '#dc2626', '#d97706', '#2563eb', '#0891b2', '#4f46e5', '#be185d'];
 
@@ -2338,13 +2653,142 @@ quickAddPlant.addEventListener('click', () => {
   archiveForm.elements.nickname.focus();
 });
 
-form.addEventListener('submit', (event) => {
+photoTabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    const tabName = tab.dataset.tab;
+    currentPhotoTab = tabName;
+    photoTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+    photoTabContents.forEach(content => {
+      content.style.display = content.dataset.tabContent === tabName ? 'block' : 'none';
+    });
+  });
+});
+
+photoUploadArea.addEventListener('click', (e) => {
+  if (e.target !== photoRemoveBtn && !photoRemoveBtn.contains(e.target)) {
+    photoFileInput.click();
+  }
+});
+
+photoUploadArea.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  photoUploadArea.style.borderColor = '#2f855a';
+  photoUploadArea.style.background = '#f0fff4';
+});
+
+photoUploadArea.addEventListener('dragleave', () => {
+  photoUploadArea.style.borderColor = '';
+  photoUploadArea.style.background = '';
+});
+
+photoUploadArea.addEventListener('drop', (e) => {
+  e.preventDefault();
+  photoUploadArea.style.borderColor = '';
+  photoUploadArea.style.background = '';
+  const files = e.dataTransfer.files;
+  if (files.length > 0 && files[0].type.startsWith('image/')) {
+    handlePhotoFile(files[0]);
+  }
+});
+
+photoFileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    handlePhotoFile(file);
+  }
+});
+
+photoRemoveBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (pendingPhotoUpload && pendingPhotoUpload.imageId) {
+    PhotoManager.deleteByPhotoUrl(pendingPhotoUpload.url).catch(err => console.warn('清理临时图片失败:', err));
+  }
+  pendingPhotoUpload = null;
+  photoPreviewContainer.style.display = 'none';
+  photoUploadArea.querySelector('.photoUploadPlaceholder').style.display = 'flex';
+  photoFileInput.value = '';
+});
+
+async function handlePhotoFile(file) {
+  try {
+    photoUploadArea.style.opacity = '0.6';
+    photoUploadArea.style.pointerEvents = 'none';
+
+    const tempRecordId = 'pending-' + crypto.randomUUID();
+    const result = await PhotoManager.handleFileUpload(file, tempRecordId);
+    pendingPhotoUpload = { ...result, tempRecordId };
+
+    photoPreview.src = result.thumbnail || result.data;
+    const sizeKB = (result.compressedSize / 1024).toFixed(1);
+    const origSizeKB = (result.originalSize / 1024).toFixed(1);
+    photoPreviewInfo.innerHTML = `压缩: ${origSizeKB}KB → ${sizeKB}KB (节省${result.compressionRatio}%)`;
+    photoPreviewContainer.style.display = 'block';
+    photoUploadArea.querySelector('.photoUploadPlaceholder').style.display = 'none';
+  } catch (err) {
+    alert('图片上传失败：' + err.message);
+    console.error('Photo upload error:', err);
+  } finally {
+    photoUploadArea.style.opacity = '';
+    photoUploadArea.style.pointerEvents = '';
+  }
+}
+
+form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(form).entries());
-  const item = { ...data, height: Number(data.height), leaves: Number(data.leaves), water: Number(data.water), light: Number(data.light), id: editingId || crypto.randomUUID() };
+  const newRecordId = editingId || crypto.randomUUID();
+
+  let photoUrl = '';
+  if (currentPhotoTab === 'upload' && pendingPhotoUpload) {
+    photoUrl = pendingPhotoUpload.url;
+    try {
+      const oldRecord = editingId ? records.find(r => r.id === editingId) : null;
+      if (oldRecord && oldRecord.photo && PhotoManager.isLocalImage(oldRecord.photo) && oldRecord.photo !== photoUrl) {
+        await PhotoManager.deleteByPhotoUrl(oldRecord.photo);
+      }
+      const photo = await PhotoStorage.get(PhotoManager.getImageId(photoUrl));
+      if (photo) {
+        photo.recordId = newRecordId;
+        await PhotoStorage.save(photo);
+      }
+    } catch (err) {
+      console.warn('更新图片关联失败:', err);
+    }
+  } else if (currentPhotoTab === 'url') {
+    photoUrl = data.photo || '';
+    if (editingId) {
+      const oldRecord = records.find(r => r.id === editingId);
+      if (oldRecord && oldRecord.photo && PhotoManager.isLocalImage(oldRecord.photo) && oldRecord.photo !== photoUrl) {
+        await PhotoManager.deleteByPhotoUrl(oldRecord.photo).catch(err => console.warn('清理旧图片失败:', err));
+      }
+    }
+  } else if (editingId) {
+    const oldRecord = records.find(r => r.id === editingId);
+    photoUrl = oldRecord ? (oldRecord.photo || '') : '';
+  }
+
+  const item = {
+    ...data,
+    height: Number(data.height),
+    leaves: Number(data.leaves),
+    water: Number(data.water),
+    light: Number(data.light),
+    photo: photoUrl,
+    id: newRecordId
+  };
+
   records = editingId ? records.map((record) => (record.id === editingId ? item : record)) : [item, ...records];
   editingId = null;
+  pendingPhotoUpload = null;
   form.reset();
+  photoPreviewContainer.style.display = 'none';
+  photoUploadArea.querySelector('.photoUploadPlaceholder').style.display = 'flex';
+  photoFileInput.value = '';
+  currentPhotoTab = 'upload';
+  photoTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === 'upload'));
+  photoTabContents.forEach(content => {
+    content.style.display = content.dataset.tabContent === 'upload' ? 'block' : 'none';
+  });
   plantNotesHint.style.display = 'none';
   save();
   syncPlantsFromRecords();
@@ -2588,7 +3032,7 @@ function renderTimeline() {
       <div class="timelineEmpty">
         <div class="timelineEmptyIcon">📷</div>
         <h4>「${timelinePlant}」暂无照片记录</h4>
-        <p>在添加生长记录时上传照片链接，即可在此处查看时间轴</p>
+        <p>在添加生长记录时上传照片，即可在此处查看时间轴</p>
         <div class="timelineNoPhotosList">
           <h5>已有记录（${data.totalRecords}条）：</h5>
           ${data.records.map((r) => `
@@ -2618,6 +3062,7 @@ function renderTimeline() {
         const hasPhoto = record.photo && record.photo.trim() !== '';
         const isFirst = index === 0;
         const isLast = index === data.records.length - 1;
+        const isLocalPhoto = hasPhoto && PhotoManager.isLocalImage(record.photo);
 
         return `
           <div class="timelineItem ${hasPhoto ? 'hasPhoto' : 'noPhoto'}">
@@ -2627,17 +3072,20 @@ function renderTimeline() {
             <div class="timelineCard ${hasPhoto ? 'photoCard' : 'infoCard'}">
               <div class="timelineCardHead">
                 <span class="timelineDate">${record.date}</span>
-                ${hasPhoto ? '<span class="photoBadge">有照片</span>' : '<span class="noPhotoBadge">无照片</span>'}
+                ${hasPhoto ? `<span class="photoBadge">${isLocalPhoto ? '📷 本地照片' : '🔗 照片链接'}</span>` : '<span class="noPhotoBadge">无照片</span>'}
               </div>
               ${hasPhoto ? `
                 <div class="timelinePhotoWrap">
                   <img
-                    src="${record.photo}"
+                    data-role="timeline-photo"
+                    data-photo="${record.photo}"
+                    data-record-id="${record.id}"
+                    data-record-date="${record.date}"
+                    data-record-plant="${timelinePlant}"
                     alt="${timelinePlant} - ${record.date}"
-                    class="timelinePhoto timelinePhotoClickable"
-                    data-compare='${JSON.stringify({ id: record.id, date: record.date, photo: record.photo, plant: timelinePlant })}'
+                    class="timelinePhoto timelinePhotoClickable ${isLocalPhoto ? 'timelinePhotoPending' : ''}"
                   />
-                  <a href="${record.photo}" target="_blank" class="photoLink">查看大图 ↗</a>
+                  <a href="#" class="photoLink" data-role="timeline-view-big" data-photo="${record.photo}">查看大图 ↗</a>
                 </div>
               ` : ''}
               <div class="timelineMeta">
@@ -2659,8 +3107,84 @@ function renderTimeline() {
     });
   }
 
-  document.querySelectorAll('.timelinePhotoClickable').forEach((img) => {
-    img.addEventListener('click', () => selectForCompare(img));
+  loadTimelinePhotos();
+  bindTimelinePhotoEvents();
+}
+
+async function loadTimelinePhotos() {
+  const imgs = document.querySelectorAll('img[data-role="timeline-photo"]');
+  for (const img of imgs) {
+    const photoUrl = img.dataset.photo;
+    if (!photoUrl) continue;
+    try {
+      const resolvedUrl = await resolveThumbnailUrl(photoUrl);
+      if (resolvedUrl) {
+        img.src = resolvedUrl;
+        img.classList.remove('timelinePhotoPending');
+      }
+    } catch (err) {
+      console.warn('加载时间轴照片失败:', err);
+    }
+  }
+}
+
+function bindTimelinePhotoEvents() {
+  document.querySelectorAll('img[data-role="timeline-photo"]').forEach((img) => {
+    img.addEventListener('click', async () => {
+      const photoUrl = img.dataset.photo;
+      const recordId = img.dataset.recordId;
+      const date = img.dataset.recordDate;
+      const plant = img.dataset.recordPlant;
+      try {
+        const resolvedPhoto = await resolvePhotoUrl(photoUrl);
+        const compareData = {
+          id: recordId,
+          date,
+          photo: resolvedPhoto,
+          plant,
+          originalPhoto: photoUrl
+        };
+        if (!comparePhoto1) {
+          comparePhoto1 = compareData;
+          img.classList.add('selectedForCompare');
+        } else if (!comparePhoto2) {
+          comparePhoto2 = compareData;
+          img.classList.add('selectedForCompare');
+        } else {
+          document.querySelectorAll('.selectedForCompare').forEach((el) => {
+            el.classList.remove('selectedForCompare');
+          });
+          comparePhoto1 = compareData;
+          comparePhoto2 = null;
+          img.classList.add('selectedForCompare');
+        }
+        updateCompareModal();
+        if (comparePhoto1 && comparePhoto2) {
+          setTimeout(() => openCompareModal(), 300);
+        }
+      } catch (err) {
+        console.error('选择对比照片失败:', err);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-role="timeline-view-big"]').forEach(link => {
+    link.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const photoUrl = link.dataset.photo;
+      if (!photoUrl) return;
+      try {
+        const resolvedUrl = await resolvePhotoUrl(photoUrl);
+        if (resolvedUrl) {
+          const w = window.open();
+          if (w) {
+            w.document.write(`<html><head><title>照片查看</title><style>body{margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;}img{max-width:100%;max-height:100vh;object-fit:contain;}</style></head><body><img src="${resolvedUrl}" alt="照片"/></body></html>`);
+          }
+        }
+      } catch (err) {
+        console.error('打开大图失败:', err);
+      }
+    });
   });
 }
 
@@ -3098,6 +3622,76 @@ function renderCareCalendar() {
   });
 }
 
+async function loadRecordThumbnails() {
+  const thumbs = document.querySelectorAll('img[data-role="record-thumb"]');
+  for (const img of thumbs) {
+    const photoUrl = img.dataset.photo;
+    if (!photoUrl) continue;
+    try {
+      if (PhotoManager.isLocalImage(photoUrl)) {
+        const thumbUrl = await PhotoManager.getThumbnailUrl(photoUrl);
+        if (thumbUrl) {
+          img.src = thumbUrl;
+          img.classList.remove('recordThumbPending');
+        } else {
+          img.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23e5eee5" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23a0aec0" font-size="12">丢失</text></svg>';
+          img.classList.remove('recordThumbPending');
+        }
+      } else {
+        img.src = photoUrl;
+        img.classList.remove('recordThumbPending');
+      }
+    } catch (err) {
+      console.warn('加载缩略图失败:', err);
+      img.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23fef2f2" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23dc2626" font-size="10">错误</text></svg>';
+      img.classList.remove('recordThumbPending');
+    }
+  }
+}
+
+function bindRecordPhotoLinks() {
+  document.querySelectorAll('[data-role="record-photo-link"]').forEach(link => {
+    link.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const photoUrl = link.dataset.photoLink;
+      if (!photoUrl) return;
+      try {
+        if (PhotoManager.isLocalImage(photoUrl)) {
+          const fullUrl = await PhotoManager.getImageUrl(photoUrl);
+          if (fullUrl) {
+            const w = window.open();
+            if (w) {
+              w.document.write(`<html><head><title>照片查看</title><style>body{margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;}img{max-width:100%;max-height:100vh;object-fit:contain;}</style></head><body><img src="${fullUrl}" alt="照片"/></body></html>`);
+            }
+          } else {
+            alert('照片数据丢失或损坏');
+          }
+        } else {
+          window.open(photoUrl, '_blank');
+        }
+      } catch (err) {
+        console.error('打开照片失败:', err);
+      }
+    });
+  });
+}
+
+async function resolvePhotoUrl(photoUrl) {
+  if (!photoUrl) return null;
+  if (PhotoManager.isLocalImage(photoUrl)) {
+    return await PhotoManager.getImageUrl(photoUrl);
+  }
+  return photoUrl;
+}
+
+async function resolveThumbnailUrl(photoUrl) {
+  if (!photoUrl) return null;
+  if (PhotoManager.isLocalImage(photoUrl)) {
+    return await PhotoManager.getThumbnailUrl(photoUrl);
+  }
+  return photoUrl;
+}
+
 function render() {
   syncPlantsFromRecords();
   updatePlantSelect();
@@ -3171,19 +3765,54 @@ function render() {
   drawLine('#heightChart', scoped.map((record) => ({ label: record.date.slice(5), value: record.height })), 'cm', '#2f855a', heightGoal);
   drawMultiBars('#careChart', scoped.map((record) => ({ label: record.date.slice(5), water: record.water, light: record.light * 20 })));
   drawLine('#leafChart', scoped.map((record) => ({ label: record.date.slice(5), value: record.leaves })), '片', '#7c3aed', leafGoal);
-  document.querySelector('#records').innerHTML = scoped.slice().reverse().map((record) => `
-    <article class="record">
-      <div><strong>${record.plant}</strong><span>${record.date} · ${record.height}cm · ${record.leaves}片叶</span><p>${record.state}</p></div>
-      ${record.photo ? `<a href="${record.photo}" target="_blank">照片</a>` : '<span class="muted">无照片</span>'}
-      <div><button data-edit="${record.id}">编辑</button><button data-del="${record.id}">删除</button></div>
-    </article>
-  `).join('') || '<p class="empty">暂无记录</p>';
-  document.querySelectorAll('[data-del]').forEach((button) => button.addEventListener('click', () => {
-    records = records.filter((record) => record.id !== button.dataset.del);
+  document.querySelector('#records').innerHTML = scoped.slice().reverse().map((record) => {
+    const hasPhoto = record.photo && record.photo.trim() !== '';
+    const isLocal = PhotoManager.isLocalImage(record.photo);
+    return `
+      <article class="record">
+        <div class="recordMain">
+          ${hasPhoto ? `
+            <div class="recordThumbWrap">
+              <img
+                class="recordThumb ${isLocal ? 'recordThumbPending' : ''}"
+                data-photo="${record.photo}"
+                data-role="record-thumb"
+                alt="缩略图"
+              />
+            </div>
+          ` : ''}
+          <div class="recordContent">
+            <strong>${record.plant}</strong>
+            <span>${record.date} · ${record.height}cm · ${record.leaves}片叶</span>
+            <p>${record.state}</p>
+          </div>
+        </div>
+        <div class="recordPhotoLink">
+          ${hasPhoto ? `<a href="#" data-photo-link="${record.photo}" data-role="record-photo-link">${isLocal ? '📷 本地照片' : '🔗 照片链接'}</a>` : '<span class="muted">无照片</span>'}
+        </div>
+        <div><button data-edit="${record.id}">编辑</button><button data-del="${record.id}">删除</button></div>
+      </article>
+    `;
+  }).join('') || '<p class="empty">暂无记录</p>';
+
+  loadRecordThumbnails();
+  bindRecordPhotoLinks();
+
+  document.querySelectorAll('[data-del]').forEach((button) => button.addEventListener('click', async () => {
+    const recordId = button.dataset.del;
+    const record = records.find((r) => r.id === recordId);
+    if (record && record.photo && PhotoManager.isLocalImage(record.photo)) {
+      try {
+        await PhotoManager.deleteByPhotoUrl(record.photo);
+      } catch (err) {
+        console.warn('删除关联图片失败:', err);
+      }
+    }
+    records = records.filter((r) => r.id !== recordId);
     save();
     render();
   }));
-  document.querySelectorAll('[data-edit]').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('[data-edit]').forEach((button) => button.addEventListener('click', async () => {
     const record = records.find((item) => item.id === button.dataset.edit);
     editingId = record.id;
     Object.entries(record).forEach(([name, value]) => {
@@ -3194,7 +3823,48 @@ function render() {
         }
       }
     });
+
+    pendingPhotoUpload = null;
+    if (record.photo) {
+      if (PhotoManager.isLocalImage(record.photo)) {
+        try {
+          const thumbUrl = await PhotoManager.getThumbnailUrl(record.photo);
+          const imgId = PhotoManager.getImageId(record.photo);
+          const photoData = await PhotoStorage.get(imgId);
+          if (thumbUrl && photoData) {
+            pendingPhotoUpload = {
+              url: record.photo,
+              imageId: imgId,
+              thumbnail: thumbUrl,
+              data: photoData.data,
+              compressedSize: photoData.size,
+              originalSize: photoData.size
+            };
+            photoPreview.src = thumbUrl;
+            const sizeKB = (photoData.size / 1024).toFixed(1);
+            photoPreviewInfo.innerHTML = `本地照片 · ${sizeKB}KB`;
+            photoPreviewContainer.style.display = 'block';
+            photoUploadArea.querySelector('.photoUploadPlaceholder').style.display = 'none';
+            currentPhotoTab = 'upload';
+          }
+        } catch (err) {
+          console.warn('加载编辑预览失败:', err);
+        }
+      } else {
+        currentPhotoTab = 'url';
+      }
+    } else {
+      currentPhotoTab = 'upload';
+      photoPreviewContainer.style.display = 'none';
+      photoUploadArea.querySelector('.photoUploadPlaceholder').style.display = 'flex';
+    }
+    photoTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === currentPhotoTab));
+    photoTabContents.forEach(content => {
+      content.style.display = content.dataset.tabContent === currentPhotoTab ? 'block' : 'none';
+    });
   }));
+  setTimeout(loadRecordThumbnails, 50);
+  setTimeout(loadRecordThumbnails, 300);
   renderCareCalendar();
   renderTimeline();
   renderExperiments();
