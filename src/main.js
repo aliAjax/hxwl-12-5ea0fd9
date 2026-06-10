@@ -322,6 +322,10 @@ let experimentViewingId = null;
 let experimentExpanded = true;
 let experimentAlignMode = 'relative';
 
+let diagnosisFilterPlant = '';
+let diagnosisCache = null;
+let diagnosisCacheTime = 0;
+
 document.querySelector('#app').innerHTML = `
   <main class="shell">
     <header class="hero">
@@ -521,6 +525,22 @@ document.querySelector('#app').innerHTML = `
       </div>
     </section>
 
+    <section class="panel diagnosisPanel" id="diagnosisPanel">
+      <div class="panelHead diagnosisHead">
+        <div class="diagnosisTitle">
+          <h2>🔍 植物状态诊断</h2>
+          <span class="diagnosisBadge" id="diagnosisBadge"></span>
+        </div>
+        <div class="diagnosisControls">
+          <select id="diagnosisPlantFilter">
+            <option value="">全部植物</option>
+          </select>
+          <button class="diagnosisRefresh" id="diagnosisRefresh">🔄 重新诊断</button>
+        </div>
+      </div>
+      <div class="diagnosisBody" id="diagnosisBody"></div>
+    </section>
+
     <section class="panel">
       <div class="panelHead"><h2>记录列表</h2><input id="search" placeholder="搜索植物或状态" /></div>
       <div class="records" id="records"></div>
@@ -640,6 +660,9 @@ const experimentBackBtn = document.querySelector('#experimentBackBtn');
 const experimentViewInfo = document.querySelector('#experimentViewInfo');
 const experimentCharts = document.querySelector('#experimentCharts');
 const experimentAlignModeSelect = document.querySelector('#experimentAlignMode');
+
+const diagnosisPlantFilter = document.querySelector('#diagnosisPlantFilter');
+const diagnosisRefreshBtn = document.querySelector('#diagnosisRefresh');
 
 const photoFileInput = document.querySelector('#photoFileInput');
 const photoUploadArea = document.querySelector('#photoUploadArea');
@@ -2803,6 +2826,7 @@ form.addEventListener('submit', async (event) => {
   save();
   syncPlantsFromRecords();
   checkAndUpdateGoalAchievement(data.plant);
+  clearDiagnosisCache();
   render();
 });
 
@@ -3820,6 +3844,7 @@ function render() {
     }
     records = records.filter((r) => r.id !== recordId);
     save();
+    clearDiagnosisCache();
     render();
   }));
   document.querySelectorAll('[data-edit]').forEach((button) => button.addEventListener('click', async () => {
@@ -3879,6 +3904,7 @@ function render() {
   renderCareCalendar();
   renderTimeline();
   renderExperiments();
+  renderDiagnosis();
 }
 
 function drawLine(selector, data, unit, color, goal) {
@@ -3926,5 +3952,544 @@ function drawMultiBars(selector, data) {
     return `<text x="${x + 20}" y="205">${item.label}</text><rect x="${x}" y="${180 - (item.water / max) * 140}" width="18" height="${(item.water / max) * 140}" rx="4" fill="#2f855a"/><rect x="${x + 24}" y="${180 - (item.light / max) * 140}" width="18" height="${(item.light / max) * 140}" rx="4" fill="#f59e0b"/>`;
   }).join('')}<text x="372" y="28">绿=浇水 橙=光照</text></svg>`;
 }
+
+const DIAGNOSIS_CONFIG = {
+  minRecords: 3,
+  cacheTTL: 5 * 60 * 1000,
+  normalGrowthRate: {
+    height: 0.15,
+    leaves: 0.3
+  },
+  thresholds: {
+    lowLight: 3,
+    highLight: 8,
+    lowWater: 30,
+    highWater: 150
+  }
+};
+
+const DIAGNOSIS_RULES = [
+  {
+    id: 'growth_stagnation',
+    name: '增长停滞',
+    icon: '📉',
+    severity: 'high',
+    check(plantRecords) {
+      if (plantRecords.length < 3) return null;
+
+      const recent = plantRecords.slice(-3);
+      const heightChanges = [];
+      const leavesChanges = [];
+
+      for (let i = 1; i < recent.length; i++) {
+        heightChanges.push(recent[i].height - recent[i - 1].height);
+        leavesChanges.push(recent[i].leaves - recent[i - 1].leaves);
+      }
+
+      const avgHeightChange = heightChanges.reduce((a, b) => a + b, 0) / heightChanges.length;
+      const avgLeavesChange = leavesChanges.reduce((a, b) => a + b, 0) / leavesChanges.length;
+      const totalDays = daysBetween(recent[0].date, recent[recent.length - 1].date) || 1;
+      const dailyHeightRate = avgHeightChange / totalDays;
+      const dailyLeavesRate = avgLeavesChange / totalDays;
+
+      const isStagnant = dailyHeightRate < DIAGNOSIS_CONFIG.normalGrowthRate.height * 0.3 &&
+                         dailyLeavesRate < DIAGNOSIS_CONFIG.normalGrowthRate.leaves * 0.3;
+
+      if (!isStagnant) return null;
+
+      return {
+        triggered: true,
+        severity: 'high',
+        reason: `最近${totalDays}天内，${recent[0].plant}的生长速度明显低于正常水平。`,
+        evidence: `高度日均增长仅 ${dailyHeightRate.toFixed(2)}cm（正常约 ${DIAGNOSIS_CONFIG.normalGrowthRate.height}cm/天），` +
+                  `叶片日均增长仅 ${dailyLeavesRate.toFixed(2)}片（正常约 ${DIAGNOSIS_CONFIG.normalGrowthRate.leaves}片/天）。\n` +
+                  `详细数据：${recent.map(r => `${r.date}: ${r.height}cm/${r.leaves}片`).join(' → ')}`,
+        suggestion: '建议检查光照、浇水和温度条件，确保植物处于适宜的生长环境。可以考虑适当增加光照时间或调整浇水量。'
+      };
+    }
+  },
+  {
+    id: 'overwatering',
+    name: '浇水过量',
+    icon: '💧',
+    severity: 'medium',
+    check(plantRecords) {
+      if (plantRecords.length < 3) return null;
+
+      const recent = plantRecords.slice(-3);
+      const avgWater = recent.reduce((sum, r) => sum + r.water, 0) / recent.length;
+      const totalDays = daysBetween(recent[0].date, recent[recent.length - 1].date) || 1;
+
+      const heightChange = recent[recent.length - 1].height - recent[0].height;
+      const dailyGrowth = heightChange / totalDays;
+
+      const isOverwatering = avgWater > DIAGNOSIS_CONFIG.thresholds.highWater &&
+                            dailyGrowth < DIAGNOSIS_CONFIG.normalGrowthRate.height * 0.5;
+
+      if (!isOverwatering) return null;
+
+      return {
+        triggered: true,
+        severity: 'medium',
+        reason: `浇水量持续偏高（平均 ${avgWater.toFixed(0)}ml/次），但生长速度并未相应提升，可能存在浇水过量的情况。`,
+        evidence: `最近3次记录平均浇水 ${avgWater.toFixed(0)}ml，阈值为 ${DIAGNOSIS_CONFIG.thresholds.highWater}ml。\n` +
+                  `同期高度日均增长仅 ${dailyGrowth.toFixed(2)}cm，低于正常水平的50%。\n` +
+                  `浇水记录：${recent.map(r => `${r.date}: ${r.water}ml`).join('、')}`,
+        suggestion: '建议减少每次浇水量，延长浇水间隔。浇水前检查土壤湿度，确保土壤表面干燥后再浇水。如果叶片出现发黄、变软等症状，更需要控制浇水。'
+      };
+    }
+  },
+  {
+    id: 'underwatering',
+    name: '浇水不足',
+    icon: '🏜️',
+    severity: 'medium',
+    check(plantRecords) {
+      if (plantRecords.length < 3) return null;
+
+      const recent = plantRecords.slice(-3);
+      const avgWater = recent.reduce((sum, r) => sum + r.water, 0) / recent.length;
+      const totalDays = daysBetween(recent[0].date, recent[recent.length - 1].date) || 1;
+
+      const heightChange = recent[recent.length - 1].height - recent[0].height;
+      const dailyGrowth = heightChange / totalDays;
+
+      const isUnderwatering = avgWater < DIAGNOSIS_CONFIG.thresholds.lowWater &&
+                             dailyGrowth < DIAGNOSIS_CONFIG.normalGrowthRate.height * 0.5;
+
+      if (!isUnderwatering) return null;
+
+      return {
+        triggered: true,
+        severity: 'medium',
+        reason: `浇水量持续偏低（平均 ${avgWater.toFixed(0)}ml/次），同时生长速度也明显缓慢，可能存在浇水不足的情况。`,
+        evidence: `最近3次记录平均浇水 ${avgWater.toFixed(0)}ml，低于建议阈值 ${DIAGNOSIS_CONFIG.thresholds.lowWater}ml。\n` +
+                  `同期高度日均增长仅 ${dailyGrowth.toFixed(2)}cm，低于正常水平的50%。\n` +
+                  `浇水记录：${recent.map(r => `${r.date}: ${r.water}ml`).join('、')}`,
+        suggestion: '建议适当增加每次的浇水量，确保根系能够充分吸收水分。浇水时要浇透，直到盆底有水流出。同时观察植物状态，如果叶片出现萎蔫、下垂，需要及时补水。'
+      };
+    }
+  },
+  {
+    id: 'low_light',
+    name: '光照不足',
+    icon: '🌥️',
+    severity: 'medium',
+    check(plantRecords) {
+      if (plantRecords.length < 3) return null;
+
+      const recent = plantRecords.slice(-3);
+      const avgLight = recent.reduce((sum, r) => sum + r.light, 0) / recent.length;
+      const totalDays = daysBetween(recent[0].date, recent[recent.length - 1].date) || 1;
+
+      const leavesChange = recent[recent.length - 1].leaves - recent[0].leaves;
+      const dailyLeavesGrowth = leavesChange / totalDays;
+
+      const isLowLight = avgLight < DIAGNOSIS_CONFIG.thresholds.lowLight &&
+                        dailyLeavesGrowth < DIAGNOSIS_CONFIG.normalGrowthRate.leaves * 0.5;
+
+      if (!isLowLight) return null;
+
+      return {
+        triggered: true,
+        severity: 'medium',
+        reason: `光照时长持续不足（平均 ${avgLight.toFixed(1)}小时/天），且叶片增长缓慢，可能影响光合作用效率。`,
+        evidence: `最近3次记录平均光照 ${avgLight.toFixed(1)}小时，低于建议阈值 ${DIAGNOSIS_CONFIG.thresholds.lowLight}小时。\n` +
+                  `同期叶片日均增长仅 ${dailyLeavesGrowth.toFixed(2)}片，低于正常水平的50%。\n` +
+                  `光照记录：${recent.map(r => `${r.date}: ${r.light}h`).join('、')}`,
+        suggestion: '建议将植物移到光照更充足的位置，如南向窗台。如果自然光照不足，可以考虑使用植物补光灯。每天保证至少4-6小时的光照时间。'
+      };
+    }
+  },
+  {
+    id: 'excessive_light',
+    name: '光照过强',
+    icon: '☀️',
+    severity: 'low',
+    check(plantRecords) {
+      if (plantRecords.length < 3) return null;
+
+      const recent = plantRecords.slice(-3);
+      const avgLight = recent.reduce((sum, r) => sum + r.light, 0) / recent.length;
+
+      const stateKeywords = ['晒伤', '焦边', '叶尖干枯', '叶片发白', '失去光泽'];
+      const hasSunburnSymptoms = recent.some(r =>
+        stateKeywords.some(kw => r.state.includes(kw))
+      );
+
+      const isExcessive = avgLight > DIAGNOSIS_CONFIG.thresholds.highLight && hasSunburnSymptoms;
+
+      if (!isExcessive) return null;
+
+      const matchedSymptom = stateKeywords.find(kw =>
+        recent.some(r => r.state.includes(kw))
+      );
+
+      return {
+        triggered: true,
+        severity: 'low',
+        reason: `光照时长持续偏长（平均 ${avgLight.toFixed(1)}小时/天），且状态描述中出现了「${matchedSymptom}」等疑似强光灼伤的症状。`,
+        evidence: `最近3次记录平均光照 ${avgLight.toFixed(1)}小时，高于建议阈值 ${DIAGNOSIS_CONFIG.thresholds.highLight}小时。\n` +
+                  `相关记录：${recent.filter(r => stateKeywords.some(kw => r.state.includes(kw))).map(r => `${r.date}: ${r.state}`).join('；')}`,
+        suggestion: '建议在光照强烈的时段（中午11点-下午3点）适当遮阴，或调整植物位置避免强光直射。同时增加空气湿度，减少叶片水分蒸发。'
+      };
+    }
+  },
+  {
+    id: 'leaf_abnormal',
+    name: '叶片异常',
+    icon: '🍂',
+    severity: 'high',
+    check(plantRecords) {
+      if (plantRecords.length < 2) return null;
+
+      const recent = plantRecords.slice(-3);
+      const leafChanges = [];
+
+      for (let i = 1; i < recent.length; i++) {
+        leafChanges.push(recent[i].leaves - recent[i - 1].leaves);
+      }
+
+      const hasLeafLoss = leafChanges.some(c => c < 0);
+
+      const abnormalKeywords = ['黄叶', '枯叶', '落叶', '掉叶', '叶片发黄', '叶片枯萎', '叶片脱落', '叶斑', '褐斑', '黑斑', '虫害', '蚜虫', '红蜘蛛'];
+      const hasAbnormalState = recent.some(r =>
+        abnormalKeywords.some(kw => r.state.includes(kw))
+      );
+
+      if (!hasLeafLoss && !hasAbnormalState) return null;
+
+      const matchedKeywords = abnormalKeywords.filter(kw =>
+        recent.some(r => r.state.includes(kw))
+      );
+
+      const lossRecords = leafChanges.map((c, i) => {
+        if (c < 0) {
+          return `${recent[i + 1].date} 比 ${recent[i].date} 减少了 ${Math.abs(c)} 片叶`;
+        }
+        return null;
+      }).filter(Boolean);
+
+      return {
+        triggered: true,
+        severity: 'high',
+        reason: hasLeafLoss
+          ? `叶片数量出现异常减少，${lossRecords.join('；')}。`
+          : `状态描述中出现了「${matchedKeywords.join('、')}」等异常关键词，需要关注。`,
+        evidence: hasLeafLoss
+          ? `叶片变化记录：${lossRecords.join('；')}\n完整记录：${recent.map(r => `${r.date}: ${r.leaves}片叶`).join(' → ')}`
+          : `异常记录：${recent.filter(r => abnormalKeywords.some(kw => r.state.includes(kw))).map(r => `${r.date}: ${r.state}`).join('；')}`,
+        suggestion: hasLeafLoss
+          ? '叶片异常脱落可能是由于环境剧变、浇水不当或病虫害引起。建议检查植物根部状态，确保养护环境稳定。如果持续掉叶，需要进一步排查是否有病虫害。'
+          : '建议仔细检查叶片正反面，确认是否有病虫害迹象。保持良好的通风环境，避免叶片长时间潮湿。如果症状持续，可以考虑使用相应的药物治疗。'
+      };
+    }
+  },
+  {
+    id: 'inconsistent_care',
+    name: '养护不稳定',
+    icon: '⚖️',
+    severity: 'low',
+    check(plantRecords) {
+      if (plantRecords.length < 4) return null;
+
+      const recent = plantRecords.slice(-4);
+
+      const waterValues = recent.map(r => r.water);
+      const waterMean = waterValues.reduce((a, b) => a + b, 0) / waterValues.length;
+      const waterVariance = waterValues.reduce((sum, v) => sum + Math.pow(v - waterMean, 2), 0) / waterValues.length;
+      const waterCV = Math.sqrt(waterVariance) / waterMean;
+
+      const lightValues = recent.map(r => r.light);
+      const lightMean = lightValues.reduce((a, b) => a + b, 0) / lightValues.length;
+      const lightVariance = lightValues.reduce((sum, v) => sum + Math.pow(v - lightMean, 2), 0) / lightValues.length;
+      const lightCV = Math.sqrt(lightVariance) / lightMean;
+
+      const isInconsistent = waterCV > 0.6 || lightCV > 0.4;
+
+      if (!isInconsistent) return null;
+
+      const issues = [];
+      if (waterCV > 0.6) {
+        issues.push(`浇水量波动较大（变异系数 ${(waterCV * 100).toFixed(0)}%）`);
+      }
+      if (lightCV > 0.4) {
+        issues.push(`光照时长波动较大（变异系数 ${(lightCV * 100).toFixed(0)}%）`);
+      }
+
+      return {
+        triggered: true,
+        severity: 'low',
+        reason: `最近4次记录显示${issues.join('，')}，养护条件不够稳定可能影响植物健康生长。`,
+        evidence: `浇水记录：${recent.map(r => `${r.date}: ${r.water}ml`).join('、')}\n` +
+                  `光照记录：${recent.map(r => `${r.date}: ${r.light}h`).join('、')}`,
+        suggestion: '建议建立规律的养护日程，保持浇水和光照条件的相对稳定。可以使用养护日历功能来提醒自己按时按量浇水，确保植物处于稳定的生长环境中。'
+      };
+    }
+  }
+];
+
+function getPlantRecords(plantName) {
+  return records
+    .filter(r => r.plant === plantName)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function diagnosePlant(plantName) {
+  const plantRecords = getPlantRecords(plantName);
+
+  if (plantRecords.length < DIAGNOSIS_CONFIG.minRecords) {
+    return {
+      plantName,
+      recordCount: plantRecords.length,
+      sufficient: false,
+      issues: [],
+      overallStatus: 'insufficient',
+      message: `该植物仅有 ${plantRecords.length} 条记录，建议至少记录 ${DIAGNOSIS_CONFIG.minRecords} 次后再进行诊断，以确保分析结果的准确性。`
+    };
+  }
+
+  const issues = [];
+
+  for (const rule of DIAGNOSIS_RULES) {
+    try {
+      const result = rule.check(plantRecords);
+      if (result && result.triggered) {
+        issues.push({
+          ruleId: rule.id,
+          name: rule.name,
+          icon: rule.icon,
+          ...result
+        });
+      }
+    } catch (err) {
+      console.warn(`规则 [${rule.id}] 执行出错:`, err);
+    }
+  }
+
+  const severityOrder = { high: 3, medium: 2, low: 1 };
+  issues.sort((a, b) => severityOrder[b.severity] - severityOrder[a.severity]);
+
+  let overallStatus = 'healthy';
+  if (issues.length > 0) {
+    const hasHigh = issues.some(i => i.severity === 'high');
+    const hasMedium = issues.some(i => i.severity === 'medium');
+    overallStatus = hasHigh ? 'critical' : (hasMedium ? 'warning' : 'warning');
+  }
+
+  return {
+    plantName,
+    recordCount: plantRecords.length,
+    sufficient: true,
+    issues,
+    overallStatus,
+    dateRange: {
+      start: plantRecords[0].date,
+      end: plantRecords[plantRecords.length - 1].date,
+      days: daysBetween(plantRecords[0].date, plantRecords[plantRecords.length - 1].date) + 1
+    }
+  };
+}
+
+function diagnoseAllPlants() {
+  const now = Date.now();
+  if (diagnosisCache && (now - diagnosisCacheTime) < DIAGNOSIS_CONFIG.cacheTTL) {
+    return diagnosisCache;
+  }
+
+  const plants = [...new Set(records.map(r => r.plant))].sort();
+  const results = plants.map(plant => diagnosePlant(plant));
+
+  diagnosisCache = results;
+  diagnosisCacheTime = now;
+
+  return results;
+}
+
+function clearDiagnosisCache() {
+  diagnosisCache = null;
+  diagnosisCacheTime = 0;
+}
+
+function getOverallStatusText(status) {
+  const texts = {
+    healthy: { text: '生长良好', icon: '✅' },
+    warning: { text: '需要关注', icon: '⚠️' },
+    critical: { text: '存在问题', icon: '🚨' },
+    insufficient: { text: '数据不足', icon: '📊' }
+  };
+  return texts[status] || texts.healthy;
+}
+
+function getSeverityText(severity) {
+  const texts = {
+    low: '轻微',
+    medium: '中等',
+    high: '严重'
+  };
+  return texts[severity] || severity;
+}
+
+function formatEvidence(evidence) {
+  return evidence.split('\n').map(line =>
+    line.trim() ? `<div>• ${line}</div>` : ''
+  ).join('');
+}
+
+function renderDiagnosis() {
+  const allResults = diagnoseAllPlants();
+  const plants = [...new Set(records.map(r => r.plant))].sort();
+
+  diagnosisPlantFilter.innerHTML = `<option value="">全部植物</option>${plants.map(p => `<option value="${p}">${p}</option>`).join('')}`;
+  diagnosisPlantFilter.value = plants.includes(diagnosisFilterPlant) ? diagnosisFilterPlant : '';
+
+  const filteredResults = diagnosisFilterPlant
+    ? allResults.filter(r => r.plantName === diagnosisFilterPlant)
+    : allResults;
+
+  const totalIssues = allResults.reduce((sum, r) => sum + r.issues.length, 0);
+  const criticalCount = allResults.filter(r => r.overallStatus === 'critical').length;
+  const warningCount = allResults.filter(r => r.overallStatus === 'warning').length;
+
+  const badgeEl = document.querySelector('#diagnosisBadge');
+  if (totalIssues > 0) {
+    badgeEl.textContent = `${criticalCount > 0 ? criticalCount + '项严重 ' : ''}${warningCount > 0 ? warningCount + '项关注' : ''}`;
+    badgeEl.className = `diagnosisBadge ${criticalCount > 0 ? 'badge-overdue' : 'badge-today'}`;
+  } else if (allResults.length > 0 && allResults.every(r => r.overallStatus === 'healthy')) {
+    badgeEl.textContent = '全部健康';
+    badgeEl.className = 'diagnosisBadge badge-ok';
+  } else {
+    badgeEl.textContent = `共 ${allResults.length} 株`;
+    badgeEl.className = 'diagnosisBadge badge-ok';
+  }
+
+  const body = document.querySelector('#diagnosisBody');
+
+  if (records.length === 0) {
+    body.innerHTML = `
+      <div class="diagnosisEmpty">
+        <div class="diagnosisEmptyIcon">🌱</div>
+        <h4>暂无生长记录</h4>
+        <p>添加植物生长记录后，系统将自动分析植物状态并提供养护建议</p>
+      </div>
+    `;
+    return;
+  }
+
+  if (filteredResults.length === 0) {
+    body.innerHTML = `
+      <div class="diagnosisEmpty">
+        <div class="diagnosisEmptyIcon">🔍</div>
+        <h4>未找到相关植物</h4>
+        <p>请选择其他植物进行诊断</p>
+      </div>
+    `;
+    return;
+  }
+
+  body.innerHTML = filteredResults.map(result => {
+    const statusInfo = getOverallStatusText(result.overallStatus);
+    const cardClass = result.overallStatus === 'critical' ? 'critical' :
+                      result.overallStatus === 'warning' ? 'has-issues' : '';
+
+    if (!result.sufficient) {
+      return `
+        <div class="diagnosisPlantCard">
+          <div class="diagnosisPlantHeader">
+            <div class="diagnosisPlantName">
+              <strong>${result.plantName}</strong>
+              <span class="diagnosisRecordCount">${result.recordCount} 条记录</span>
+            </div>
+            <span class="diagnosisOverallStatus status-insufficient">
+              ${statusInfo.icon} ${statusInfo.text}
+            </span>
+          </div>
+          <div class="diagnosisInsufficientHint">
+            <span class="hintIcon">📋</span>
+            <span>${result.message}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    let content = '';
+
+    if (result.issues.length === 0) {
+      content = `
+        <div class="diagnosisHealthyMessage">
+          <span class="healthyIcon">🎉</span>
+          <span>
+            <strong>${result.plantName}</strong> 状态良好！<br/>
+            记录时段：${result.dateRange.start} ~ ${result.dateRange.end}（共 ${result.dateRange.days} 天）<br/>
+            继续保持当前的养护习惯，定期记录观察。
+          </span>
+        </div>
+      `;
+    } else {
+      content = `
+        <div class="diagnosisIssuesList">
+          ${result.issues.map(issue => `
+            <div class="diagnosisIssueCard severity-${issue.severity}">
+              <div class="diagnosisIssueHead">
+                <div class="diagnosisIssueTitle">
+                  <span class="diagnosisIssueIcon">${issue.icon}</span>
+                  <span>${issue.name}</span>
+                </div>
+                <span class="diagnosisIssueSeverity">${getSeverityText(issue.severity)}</span>
+              </div>
+              <div class="diagnosisIssueReason">${issue.reason}</div>
+              <div class="diagnosisIssueEvidence">
+                <span class="evidenceLabel">📈 数据证据：</span>
+                ${formatEvidence(issue.evidence)}
+              </div>
+              <div class="diagnosisIssueSuggestion">
+                <span class="suggestionIcon">💡</span>
+                <span>${issue.suggestion}</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    return `
+      <div class="diagnosisPlantCard ${cardClass}">
+        <div class="diagnosisPlantHeader">
+          <div class="diagnosisPlantName">
+            <strong>${result.plantName}</strong>
+            <span class="diagnosisRecordCount">
+              ${result.recordCount} 条记录 · ${result.dateRange.start} ~ ${result.dateRange.end}
+            </span>
+          </div>
+          <span class="diagnosisOverallStatus status-${result.overallStatus}">
+            ${statusInfo.icon} ${statusInfo.text}
+          </span>
+        </div>
+        ${content}
+      </div>
+    `;
+  }).join('') + `
+    <div class="diagnosisRulesInfo">
+      <strong>📋 诊断规则说明：</strong>
+      <ul>
+        ${DIAGNOSIS_RULES.map(r => `<li>${r.icon} <strong>${r.name}</strong>：基于${r.severity === 'high' ? '高度' : r.severity === 'medium' ? '中度' : '轻度'}关联指标分析</li>`).join('')}
+      </ul>
+      <p style="margin: 6px 0 0 0;">
+        * 诊断基于历史记录数据分析，仅供参考。实际养护请结合植物具体状态和环境条件判断。
+        最少需要 ${DIAGNOSIS_CONFIG.minRecords} 条记录才能进行有效诊断。
+      </p>
+    </div>
+  `;
+}
+
+diagnosisPlantFilter.addEventListener('change', () => {
+  diagnosisFilterPlant = diagnosisPlantFilter.value;
+  renderDiagnosis();
+});
+
+diagnosisRefreshBtn.addEventListener('click', () => {
+  clearDiagnosisCache();
+  renderDiagnosis();
+});
 
 render();

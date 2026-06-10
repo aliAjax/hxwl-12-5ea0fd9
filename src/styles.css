@@ -2491,7 +2491,357 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
   min-height: 240px;
 }
 
+.diagnosisPanel {
+  margin: 18px 0;
+}
+
+.diagnosisHead {
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.diagnosisTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.diagnosisTitle h2 {
+  margin: 0;
+}
+
+.diagnosisBadge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.diagnosisControls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.diagnosisControls select {
+  width: auto;
+  min-width: 150px;
+}
+
+.diagnosisRefresh {
+  background: #e3f3e9;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: #2f855a;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.diagnosisRefresh:hover {
+  background: #2f855a;
+  color: white;
+}
+
+.diagnosisBody {
+  display: grid;
+  gap: 16px;
+}
+
+.diagnosisPlantCard {
+  background: #fcfffc;
+  border: 1px solid #e5eee5;
+  border-radius: 8px;
+  padding: 16px;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.diagnosisPlantCard:hover {
+  box-shadow: 0 4px 12px rgba(27, 68, 38, 0.08);
+}
+
+.diagnosisPlantCard.has-issues {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
+.diagnosisPlantCard.critical {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.diagnosisPlantHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.diagnosisPlantName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.diagnosisPlantName strong {
+  font-size: 16px;
+  color: #1f2a22;
+}
+
+.diagnosisRecordCount {
+  color: #60715f;
+  font-size: 13px;
+}
+
+.diagnosisOverallStatus {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-healthy {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.status-warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-critical {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.status-insufficient {
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
+.diagnosisInsufficientHint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  background: #f3f4f6;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #4b5563;
+}
+
+.diagnosisInsufficientHint .hintIcon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.diagnosisIssuesList {
+  display: grid;
+  gap: 10px;
+}
+
+.diagnosisIssueCard {
+  background: white;
+  border: 1px solid #e5eee5;
+  border-radius: 6px;
+  padding: 12px;
+  border-left: 4px solid #e5e7eb;
+}
+
+.diagnosisIssueCard.severity-low {
+  border-left-color: #60a5fa;
+  background: #eff6ff;
+}
+
+.diagnosisIssueCard.severity-medium {
+  border-left-color: #fbbf24;
+  background: #fffbeb;
+}
+
+.diagnosisIssueCard.severity-high {
+  border-left-color: #f87171;
+  background: #fef2f2;
+}
+
+.diagnosisIssueHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.diagnosisIssueTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #1f2a22;
+}
+
+.diagnosisIssueIcon {
+  font-size: 18px;
+}
+
+.diagnosisIssueSeverity {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.severity-low .diagnosisIssueSeverity {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.severity-medium .diagnosisIssueSeverity {
+  background: #fde68a;
+  color: #92400e;
+}
+
+.severity-high .diagnosisIssueSeverity {
+  background: #fecaca;
+  color: #991b1b;
+}
+
+.diagnosisIssueReason {
+  font-size: 14px;
+  color: #374151;
+  line-height: 1.6;
+  margin-bottom: 8px;
+}
+
+.diagnosisIssueReason strong {
+  color: #1f2a22;
+}
+
+.diagnosisIssueEvidence {
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #4b5563;
+  margin-bottom: 8px;
+  border-left: 2px solid #d1d5db;
+}
+
+.diagnosisIssueEvidence .evidenceLabel {
+  font-weight: 600;
+  color: #374151;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.diagnosisIssueSuggestion {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: #166534;
+  background: #f0fdf4;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border-left: 2px solid #22c55e;
+}
+
+.diagnosisIssueSuggestion .suggestionIcon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.diagnosisHealthyMessage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  color: #166534;
+  font-size: 14px;
+}
+
+.diagnosisHealthyMessage .healthyIcon {
+  font-size: 24px;
+}
+
+.diagnosisEmpty {
+  text-align: center;
+  padding: 40px 20px;
+  color: #60715f;
+}
+
+.diagnosisEmptyIcon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.diagnosisEmpty h4 {
+  margin: 0 0 8px;
+  color: #1f2a22;
+  font-size: 18px;
+}
+
+.diagnosisEmpty p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.diagnosisRulesInfo {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f6faf6;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #60715f;
+  border: 1px dashed #cfe2cf;
+}
+
+.diagnosisRulesInfo strong {
+  color: #2f855a;
+}
+
+.diagnosisRulesInfo ul {
+  margin: 6px 0 0 0;
+  padding-left: 20px;
+}
+
+.diagnosisRulesInfo li {
+  margin-bottom: 2px;
+}
+
 @media (max-width: 900px) {
+  .diagnosisHead {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .diagnosisControls {
+    width: 100%;
+  }
+
+  .diagnosisControls select {
+    width: 100%;
+    min-width: auto;
+  }
+
+  .diagnosisRefresh {
+    width: 100%;
+  }
+
   .record {
     grid-template-columns: 1fr;
     gap: 10px;
