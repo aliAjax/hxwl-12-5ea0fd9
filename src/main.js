@@ -4,6 +4,7 @@ const key = 'hxwl-12-plant-growth';
 const careKey = 'hxwl-12-plant-care';
 const archiveKey = 'hxwl-12-plant-archive';
 const goalsKey = 'hxwl-12-plant-goals';
+const experimentsKey = 'hxwl-12-experiments';
 
 const seed = [
   { id: crypto.randomUUID(), plant: '窗台薄荷', date: '2026-06-01', height: 12, leaves: 18, water: 80, light: 5.5, photo: 'https://images.unsplash.com/photo-1628556270448-4d4e4148e1b1?auto=format&fit=crop&w=600&q=80', state: '新叶展开，长势良好' },
@@ -31,6 +32,14 @@ let archiveExpanded = true;
 let goalEditingId = null;
 let goalModalVisible = false;
 let goalModalPlant = '';
+
+let experiments = JSON.parse(localStorage.getItem(experimentsKey) || 'null') || [];
+let experimentEditingId = null;
+let experimentFormType = 'plant';
+let experimentGroups = [];
+let experimentViewingId = null;
+let experimentExpanded = true;
+let experimentAlignMode = 'relative';
 
 document.querySelector('#app').innerHTML = `
   <main class="shell">
@@ -149,6 +158,65 @@ document.querySelector('#app').innerHTML = `
       <div class="timelineContent" id="timelineContent"></div>
     </section>
 
+    <section class="panel experimentPanel" id="experimentPanel">
+      <div class="panelHead experimentHead">
+        <div class="experimentTitle">
+          <h2>🧪 生长实验对比</h2>
+          <span class="experimentBadge" id="experimentBadge"></span>
+        </div>
+        <button class="experimentToggle" id="experimentToggle">收起</button>
+      </div>
+      <div class="experimentBody" id="experimentBody">
+        <form id="experimentForm" class="experimentForm">
+          <h3 id="experimentFormTitle">创建对比实验</h3>
+          <div class="experimentFormGrid">
+            <input name="name" placeholder="实验名称 *" required />
+            <div class="experimentTypeSelector">
+              <label class="experimentTypeOption">
+                <input type="radio" name="expType" value="plant" checked />
+                <span>按植物对比</span>
+              </label>
+              <label class="experimentTypeOption">
+                <input type="radio" name="expType" value="dateRange" />
+                <span>按时间段对比</span>
+              </label>
+            </div>
+          </div>
+          <textarea name="description" placeholder="实验说明（养护条件、变量控制等）"></textarea>
+          <div class="experimentGroupsSection">
+            <div class="experimentGroupsHead">
+              <h4>实验组</h4>
+              <button type="button" class="experimentAddGroup" id="experimentAddGroup">+ 添加实验组</button>
+            </div>
+            <div class="experimentGroupsList" id="experimentGroupsList"></div>
+          </div>
+          <div class="experimentFormActions">
+            <button type="submit" class="primary" id="experimentSaveBtn">创建实验</button>
+            <button type="button" class="experimentCancel" id="experimentCancelBtn" style="display: none;">取消</button>
+          </div>
+        </form>
+
+        <div class="experimentView" id="experimentView" style="display: none;">
+          <div class="experimentViewHead">
+            <button class="experimentBackBtn" id="experimentBackBtn">← 返回实验列表</button>
+            <div class="experimentViewControls">
+              <label class="alignModeLabel">
+                对齐方式：
+                <select id="experimentAlignMode">
+                  <option value="relative">按相对天数</option>
+                  <option value="date">按实际日期</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="experimentViewInfo" id="experimentViewInfo"></div>
+          <div class="experimentCharts" id="experimentCharts"></div>
+        </div>
+
+        <div class="experimentList" id="experimentList"></div>
+      </div>
+    </section>
+
     <section class="panel">
       <div class="panelHead"><h2>记录列表</h2><input id="search" placeholder="搜索植物或状态" /></div>
       <div class="records" id="records"></div>
@@ -255,6 +323,22 @@ const importCancelBtn = document.querySelector('#importCancelBtn');
 const importConfirmBtn = document.querySelector('#importConfirmBtn');
 const importModalBody = document.querySelector('#importModalBody');
 
+const experimentForm = document.querySelector('#experimentForm');
+const experimentFormTitle = document.querySelector('#experimentFormTitle');
+const experimentGroupsList = document.querySelector('#experimentGroupsList');
+const experimentAddGroupBtn = document.querySelector('#experimentAddGroup');
+const experimentCancelBtn = document.querySelector('#experimentCancelBtn');
+const experimentSaveBtn = document.querySelector('#experimentSaveBtn');
+const experimentToggle = document.querySelector('#experimentToggle');
+const experimentList = document.querySelector('#experimentList');
+const experimentView = document.querySelector('#experimentView');
+const experimentBackBtn = document.querySelector('#experimentBackBtn');
+const experimentViewInfo = document.querySelector('#experimentViewInfo');
+const experimentCharts = document.querySelector('#experimentCharts');
+const experimentAlignModeSelect = document.querySelector('#experimentAlignMode');
+
+const EXPERIMENT_COLORS = ['#2f855a', '#7c3aed', '#dc2626', '#d97706', '#2563eb', '#0891b2', '#4f46e5', '#be185d'];
+
 let pendingImportData = null;
 let importValidationResult = null;
 let importStrategy = 'skip';
@@ -266,6 +350,10 @@ function saveArchive() {
 
 function saveGoals() {
   localStorage.setItem(goalsKey, JSON.stringify(plantGoals));
+}
+
+function saveExperiments() {
+  localStorage.setItem(experimentsKey, JSON.stringify(experiments));
 }
 
 const EXPORT_VERSION = '1.0';
@@ -283,6 +371,12 @@ const GOAL_SCHEMA = ['id', 'plantName', 'targetHeight', 'targetLeaves', 'targetD
 const GOAL_REQUIRED_FIELDS = ['id', 'plantName', 'targetHeight', 'targetLeaves', 'targetDate'];
 const GOAL_OPTIONAL_FIELDS = ['createdAt', 'achieved', 'achievedAt', 'startHeight', 'startLeaves'];
 
+const EXPERIMENT_SCHEMA = ['id', 'name', 'description', 'type', 'groups', 'createdAt'];
+const EXPERIMENT_REQUIRED_FIELDS = ['id', 'name', 'type', 'groups'];
+const EXPERIMENT_OPTIONAL_FIELDS = ['description', 'createdAt'];
+const EXPERIMENT_GROUP_SCHEMA = ['id', 'name', 'type', 'plantName', 'dateStart', 'dateEnd', 'color'];
+const EXPERIMENT_GROUP_REQUIRED_FIELDS = ['id', 'name', 'type'];
+
 function exportData() {
   const exportObj = {
     _meta: {
@@ -294,7 +388,8 @@ function exportData() {
     records: records,
     plantArchive: plantArchive,
     plantGoals: plantGoals,
-    careCompleted: careCompleted
+    careCompleted: careCompleted,
+    experiments: experiments
   };
 
   const jsonStr = JSON.stringify(exportObj, null, 2);
@@ -323,50 +418,60 @@ function validateImportData(data) {
       archive: 0,
       goals: 0,
       careCompleted: 0,
+      experiments: 0,
       duplicateRecords: 0,
       duplicateArchive: 0,
       duplicateGoals: 0,
       duplicateCare: 0,
+      duplicateExperiments: 0,
       fileInternalDuplicateRecords: 0,
       fileInternalDuplicateArchive: 0,
       fileInternalDuplicateGoals: 0,
       fileInternalDuplicateCare: 0,
+      fileInternalDuplicateExperiments: 0,
       missingRequiredFields: 0,
       missingOptionalFields: 0,
       blockedRecords: 0,
       blockedArchive: 0,
       blockedGoals: 0,
+      blockedExperiments: 0,
       newRecords: 0,
       newArchive: 0,
       newGoals: 0,
-      newCare: 0
+      newCare: 0,
+      newExperiments: 0
     },
     duplicates: {
       records: [],
       archive: [],
       goals: [],
-      care: []
+      care: [],
+      experiments: []
     },
     fileInternalDuplicates: {
       records: [],
       archive: [],
       goals: [],
-      care: []
+      care: [],
+      experiments: []
     },
     missingRequired: {
       records: [],
       archive: [],
-      goals: []
+      goals: [],
+      experiments: []
     },
     missingOptional: {
       records: [],
       archive: [],
-      goals: []
+      goals: [],
+      experiments: []
     },
     blocked: {
       records: [],
       archive: [],
-      goals: []
+      goals: [],
+      experiments: []
     }
   };
 
@@ -404,15 +509,22 @@ function validateImportData(data) {
     return result;
   }
 
+  if (data.experiments && !Array.isArray(data.experiments)) {
+    result.errors.push({ type: 'danger', title: '数据结构错误', details: 'experiments 字段不是数组' });
+    return result;
+  }
+
   const existingRecordIds = new Set(records.map(r => r.id));
   const existingArchiveIds = new Set(plantArchive.map(p => p.id));
   const existingGoalIds = new Set(plantGoals.map(g => g.id));
   const existingCareKeys = new Set(Object.keys(careCompleted));
+  const existingExperimentIds = new Set(experiments.map(e => e.id));
 
   result.stats.records = data.records.length;
   result.stats.archive = data.plantArchive.length;
   result.stats.goals = data.plantGoals.length;
   result.stats.careCompleted = Object.keys(data.careCompleted).length;
+  result.stats.experiments = data.experiments ? data.experiments.length : 0;
 
   const fileRecordIds = {};
   data.records.forEach((record, index) => {
@@ -572,7 +684,68 @@ function validateImportData(data) {
     }
   });
 
-  const totalBlocked = result.stats.blockedRecords + result.stats.blockedArchive + result.stats.blockedGoals;
+  if (data.experiments) {
+    const fileExperimentIds = {};
+    data.experiments.forEach((exp, index) => {
+      let isBlocked = false;
+      let blockReasons = [];
+
+      const missingRequired = EXPERIMENT_REQUIRED_FIELDS.filter(field => !(field in exp));
+      const missingOptional = EXPERIMENT_OPTIONAL_FIELDS.filter(field => !(field in exp));
+
+      if (missingRequired.length > 0) {
+        result.stats.missingRequiredFields++;
+        result.missingRequired.experiments.push({ index, id: exp.id || '未知ID', name: exp.name, missing: missingRequired });
+        isBlocked = true;
+        blockReasons.push(`缺失必填字段: ${missingRequired.join(', ')}`);
+      }
+
+      if (missingOptional.length > 0) {
+        result.stats.missingOptionalFields++;
+        result.missingOptional.experiments.push({ index, id: exp.id || '未知ID', name: exp.name, missing: missingOptional });
+      }
+
+      if (exp.groups && Array.isArray(exp.groups)) {
+        exp.groups.forEach((group, gIdx) => {
+          const groupMissing = EXPERIMENT_GROUP_REQUIRED_FIELDS.filter(field => !(field in group));
+          if (groupMissing.length > 0) {
+            result.stats.missingRequiredFields++;
+            result.missingRequired.experiments.push({ index, id: exp.id, name: `${exp.name} - 实验组${gIdx + 1}`, missing: groupMissing });
+            isBlocked = true;
+            blockReasons.push(`实验组${gIdx + 1}缺失必填字段: ${groupMissing.join(', ')}`);
+          }
+        });
+      }
+
+      if (exp.id) {
+        if (Object.prototype.hasOwnProperty.call(fileExperimentIds, exp.id)) {
+          result.stats.fileInternalDuplicateExperiments++;
+          result.fileInternalDuplicates.experiments.push({ id: exp.id, name: exp.name, firstIndex: fileExperimentIds[exp.id], duplicateIndex: index });
+          isBlocked = true;
+          blockReasons.push('文件内ID重复');
+        } else {
+          fileExperimentIds[exp.id] = index;
+        }
+      } else {
+        isBlocked = true;
+        blockReasons.push('缺少ID字段');
+      }
+
+      if (isBlocked) {
+        result.stats.blockedExperiments++;
+        result.blocked.experiments.push({ index, id: exp.id || '未知ID', name: exp.name, reasons: blockReasons });
+      } else {
+        if (existingExperimentIds.has(exp.id)) {
+          result.stats.duplicateExperiments++;
+          result.duplicates.experiments.push({ id: exp.id, name: exp.name });
+        } else {
+          result.stats.newExperiments++;
+        }
+      }
+    });
+  }
+
+  const totalBlocked = result.stats.blockedRecords + result.stats.blockedArchive + result.stats.blockedGoals + result.stats.blockedExperiments;
   if (totalBlocked > 0) {
     result.errors.push({
       type: 'danger',
@@ -581,7 +754,7 @@ function validateImportData(data) {
     });
   }
 
-  const totalFileInternalDuplicates = result.stats.fileInternalDuplicateRecords + result.stats.fileInternalDuplicateArchive + result.stats.fileInternalDuplicateGoals + result.stats.fileInternalDuplicateCare;
+  const totalFileInternalDuplicates = result.stats.fileInternalDuplicateRecords + result.stats.fileInternalDuplicateArchive + result.stats.fileInternalDuplicateGoals + result.stats.fileInternalDuplicateCare + result.stats.fileInternalDuplicateExperiments;
   if (totalFileInternalDuplicates > 0) {
     result.errors.push({
       type: 'danger',
@@ -606,7 +779,7 @@ function validateImportData(data) {
     });
   }
 
-  const totalDuplicates = result.stats.duplicateRecords + result.stats.duplicateArchive + result.stats.duplicateGoals + result.stats.duplicateCare;
+  const totalDuplicates = result.stats.duplicateRecords + result.stats.duplicateArchive + result.stats.duplicateGoals + result.stats.duplicateCare + result.stats.duplicateExperiments;
   if (totalDuplicates > 0) {
     result.warnings.push({
       type: 'warning',
@@ -615,7 +788,7 @@ function validateImportData(data) {
     });
   }
 
-  const totalNew = result.stats.newRecords + result.stats.newArchive + result.stats.newGoals + result.stats.newCare;
+  const totalNew = result.stats.newRecords + result.stats.newArchive + result.stats.newGoals + result.stats.newCare + result.stats.newExperiments;
   if (totalNew > 0) {
     result.info.push({
       type: 'info',
@@ -627,9 +800,10 @@ function validateImportData(data) {
   const validatableRecords = result.stats.records - result.stats.blockedRecords;
   const validatableArchive = result.stats.archive - result.stats.blockedArchive;
   const validatableGoals = result.stats.goals - result.stats.blockedGoals;
+  const validatableExperiments = result.stats.experiments - result.stats.blockedExperiments;
 
   result.valid = true;
-  result.canImport = (validatableRecords > 0 || validatableArchive > 0 || validatableGoals > 0 || result.stats.careCompleted > 0);
+  result.canImport = (validatableRecords > 0 || validatableArchive > 0 || validatableGoals > 0 || result.stats.careCompleted > 0 || validatableExperiments > 0);
 
   return result;
 }
@@ -855,7 +1029,7 @@ function renderImportPreview() {
     `;
   }
 
-  const totalNew = result.stats.newRecords + result.stats.newArchive + result.stats.newGoals + result.stats.newCare;
+  const totalNew = result.stats.newRecords + result.stats.newArchive + result.stats.newGoals + result.stats.newCare + result.stats.newExperiments;
   const totalMissingRequired = result.stats.missingRequiredFields;
   const totalMissingOptional = result.stats.missingOptionalFields;
 
@@ -881,6 +1055,10 @@ function renderImportPreview() {
           <div class="importSummaryItem">
             <span class="importSummaryLabel">养护完成</span>
             <span class="importSummaryValue">${result.stats.careCompleted}</span>
+          </div>
+          <div class="importSummaryItem">
+            <span class="importSummaryLabel">对比实验</span>
+            <span class="importSummaryValue">${result.stats.experiments}</span>
           </div>
         </div>
       </div>
@@ -1016,7 +1194,8 @@ function performImport() {
     records: [...records],
     plantArchive: [...plantArchive],
     plantGoals: [...plantGoals],
-    careCompleted: { ...careCompleted }
+    careCompleted: { ...careCompleted },
+    experiments: [...experiments]
   };
 
   try {
@@ -1028,16 +1207,19 @@ function performImport() {
     const existingArchiveIds = new Set(plantArchive.map(p => p.id));
     const existingGoalIds = new Set(plantGoals.map(g => g.id));
     const existingCareKeys = new Set(Object.keys(careCompleted));
+    const existingExperimentIds = new Set(experiments.map(e => e.id));
 
     const fileInternalDuplicateRecordIds = new Set(result.fileInternalDuplicates.records.map(d => d.id));
     const fileInternalDuplicateArchiveIds = new Set(result.fileInternalDuplicates.archive.map(d => d.id));
     const fileInternalDuplicateGoalIds = new Set(result.fileInternalDuplicates.goals.map(d => d.id));
     const fileInternalDuplicateCareKeys = new Set(result.fileInternalDuplicates.care.map(d => d.key));
+    const fileInternalDuplicateExperimentIds = new Set(result.fileInternalDuplicates.experiments.map(d => d.id));
 
     let importedRecords = 0;
     let importedArchive = 0;
     let importedGoals = 0;
     let importedCare = 0;
+    let importedExperiments = 0;
 
     data.records.forEach(record => {
       if (!record.id) return;
@@ -1111,20 +1293,44 @@ function performImport() {
       importedCare++;
     });
 
+    if (data.experiments) {
+      data.experiments.forEach(exp => {
+        if (!exp.id) return;
+        if (fileInternalDuplicateExperimentIds.has(exp.id)) return;
+        if (result.blocked.experiments.some(e => e.id === exp.id)) return;
+
+        const missingRequired = EXPERIMENT_REQUIRED_FIELDS.filter(field => !(field in exp));
+        if (missingRequired.length > 0) return;
+
+        const hasId = existingExperimentIds.has(exp.id);
+        if (strategy === 'skip' && hasId) return;
+        if (strategy === 'overwrite' && hasId) {
+          experiments = experiments.map(e => e.id === exp.id ? { ...exp } : e);
+        } else if (strategy === 'duplicate' && hasId) {
+          experiments.unshift({ ...exp, id: crypto.randomUUID() });
+        } else {
+          experiments.unshift({ ...exp });
+        }
+        importedExperiments++;
+      });
+    }
+
     save();
     saveArchive();
     saveGoals();
     saveCare();
+    saveExperiments();
 
-    const totalBlocked = result.stats.blockedRecords + result.stats.blockedArchive + result.stats.blockedGoals;
-    const totalFileInternalDuplicates = result.stats.fileInternalDuplicateRecords + result.stats.fileInternalDuplicateArchive + result.stats.fileInternalDuplicateGoals + result.stats.fileInternalDuplicateCare;
+    const totalBlocked = result.stats.blockedRecords + result.stats.blockedArchive + result.stats.blockedGoals + result.stats.blockedExperiments;
+    const totalFileInternalDuplicates = result.stats.fileInternalDuplicateRecords + result.stats.fileInternalDuplicateArchive + result.stats.fileInternalDuplicateGoals + result.stats.fileInternalDuplicateCare + result.stats.fileInternalDuplicateExperiments;
 
     let message = `导入完成！\n\n`;
     message += `✅ 成功导入:\n`;
     message += `  生长记录: ${importedRecords} 条\n`;
     message += `  植物档案: ${importedArchive} 条\n`;
     message += `  生长目标: ${importedGoals} 条\n`;
-    message += `  养护完成: ${importedCare} 项\n\n`;
+    message += `  养护完成: ${importedCare} 项\n`;
+    message += `  对比实验: ${importedExperiments} 个\n\n`;
     message += `处理策略: ${strategy === 'skip' ? '跳过重复' : strategy === 'overwrite' ? '覆盖现有' : '全部作为新记录'}\n`;
 
     if (totalBlocked > 0 || totalFileInternalDuplicates > 0) {
@@ -1149,11 +1355,13 @@ function performImport() {
     plantArchive = backup.plantArchive;
     plantGoals = backup.plantGoals;
     careCompleted = backup.careCompleted;
+    experiments = backup.experiments;
 
     save();
     saveArchive();
     saveGoals();
     saveCare();
+    saveExperiments();
 
     alert(`导入失败，已回滚到之前的数据状态。\n\n错误信息: ${err.message}`);
   }
@@ -1288,6 +1496,647 @@ function getOverdueGoalsWithDetails() {
   return overdue;
 }
 
+function getGroupRecords(group) {
+  if (group.type === 'plant') {
+    return records
+      .filter(r => r.plant === group.plantName)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  } else {
+    return records
+      .filter(r => r.plant === group.plantName && r.date >= group.dateStart && r.date <= group.dateEnd)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }
+}
+
+function getGroupDateRange(group) {
+  const groupRecords = getGroupRecords(group);
+  if (groupRecords.length === 0) return { start: null, end: null, days: 0 };
+  const start = groupRecords[0].date;
+  const end = groupRecords[groupRecords.length - 1].date;
+  return { start, end, days: daysBetween(start, end) + 1 };
+}
+
+function alignExperimentData(experiment, alignMode) {
+  const alignedData = [];
+  const groupsData = [];
+
+  experiment.groups.forEach((group, groupIndex) => {
+    const groupRecords = getGroupRecords(group);
+    if (groupRecords.length === 0) {
+      groupsData.push({ group, records: [], alignedPoints: [] });
+      return;
+    }
+
+    const baseDate = groupRecords[0].date;
+    const points = groupRecords.map(record => {
+      const dayOffset = alignMode === 'relative' ? daysBetween(baseDate, record.date) : null;
+      return {
+        ...record,
+        dayOffset,
+        sortKey: alignMode === 'relative' ? dayOffset : record.date
+      };
+    });
+
+    groupsData.push({ group, records: groupRecords, alignedPoints: points });
+  });
+
+  const allSortKeys = new Set();
+  groupsData.forEach(gd => {
+    gd.alignedPoints.forEach(p => allSortKeys.add(p.sortKey));
+  });
+
+  const sortedKeys = Array.from(allSortKeys).sort((a, b) => {
+    if (typeof a === 'number' && typeof b === 'number') return a - b;
+    return String(a).localeCompare(String(b));
+  });
+
+  sortedKeys.forEach(key => {
+    const dataPoint = { key, label: alignMode === 'relative' ? `Day ${key}` : String(key).slice(5) };
+    groupsData.forEach((gd, idx) => {
+      const point = gd.alignedPoints.find(p => p.sortKey === key);
+      dataPoint[`group_${idx}`] = point || null;
+      if (point) {
+        if (!dataPoint.groups) dataPoint.groups = [];
+        dataPoint.groups.push(idx);
+      }
+    });
+    alignedData.push(dataPoint);
+  });
+
+  return { alignedData, groupsData, sortedKeys };
+}
+
+function calculateGrowthMetrics(group, records) {
+  if (records.length < 2) {
+    return {
+      heightGrowth: 0,
+      heightGrowthRate: 0,
+      leavesGrowth: 0,
+      leavesGrowthRate: 0,
+      totalWater: 0,
+      avgWater: 0,
+      totalLight: 0,
+      avgLight: 0,
+      recordCount: records.length,
+      durationDays: 0
+    };
+  }
+
+  const first = records[0];
+  const last = records[records.length - 1];
+  const durationDays = daysBetween(first.date, last.date) || 1;
+
+  const heightGrowth = last.height - first.height;
+  const leavesGrowth = last.leaves - first.leaves;
+  const totalWater = records.reduce((sum, r) => sum + (r.water || 0), 0);
+  const totalLight = records.reduce((sum, r) => sum + (r.light || 0), 0);
+
+  return {
+    heightGrowth: Number(heightGrowth.toFixed(1)),
+    heightGrowthRate: Number((heightGrowth / durationDays).toFixed(2)),
+    leavesGrowth,
+    leavesGrowthRate: Number((leavesGrowth / durationDays).toFixed(2)),
+    totalWater: Number(totalWater.toFixed(0)),
+    avgWater: Number((totalWater / records.length).toFixed(0)),
+    totalLight: Number(totalLight.toFixed(1)),
+    avgLight: Number((totalLight / records.length).toFixed(1)),
+    recordCount: records.length,
+    durationDays
+  };
+}
+
+function drawMultiLineCompare(selector, alignedData, groupsData, field, unit, yAxisLabel) {
+  const el = document.querySelector(selector);
+  if (alignedData.length === 0) {
+    el.innerHTML = '<p class="empty">暂无对比数据</p>';
+    return;
+  }
+
+  const width = 600;
+  const height = 240;
+  const paddingLeft = 50;
+  const paddingRight = 120;
+  const paddingTop = 20;
+  const paddingBottom = 40;
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+
+  let maxValue = 0;
+  groupsData.forEach(gd => {
+    gd.alignedPoints.forEach(p => {
+      if (p[field] > maxValue) maxValue = p[field];
+    });
+  });
+  maxValue = Math.max(maxValue * 1.2, 1);
+
+  const xStep = alignedData.length > 1 ? chartWidth / (alignedData.length - 1) : chartWidth;
+
+  let linesSvg = '';
+  let dotsSvg = '';
+
+  groupsData.forEach((gd, groupIndex) => {
+    const color = gd.group.color;
+    const validPoints = [];
+
+    alignedData.forEach((dp, i) => {
+      const point = dp[`group_${groupIndex}`];
+      if (point && point[field] !== null && point[field] !== undefined) {
+        const x = paddingLeft + i * xStep;
+        const y = paddingTop + chartHeight - (point[field] / maxValue) * chartHeight;
+        validPoints.push({ x, y, value: point[field], label: dp.label });
+      }
+    });
+
+    if (validPoints.length > 1) {
+      const pathD = validPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+      linesSvg += `<path d="${pathD}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
+
+    validPoints.forEach(p => {
+      dotsSvg += `<circle cx="${p.x}" cy="${p.y}" r="5" fill="${color}" stroke="white" stroke-width="2"/>`;
+    });
+  });
+
+  let axisSvg = '';
+  const yTicks = 5;
+  for (let i = 0; i <= yTicks; i++) {
+    const y = paddingTop + chartHeight - (i / yTicks) * chartHeight;
+    const value = (maxValue * i / yTicks).toFixed(1);
+    axisSvg += `<line x1="${paddingLeft}" y1="${y}" x2="${paddingLeft + chartWidth}" y2="${y}" stroke="#e5eee5" stroke-width="1"/>`;
+    axisSvg += `<text x="${paddingLeft - 8}" y="${y + 4}" text-anchor="end" fill="#60715f" font-size="11">${value}</text>`;
+  }
+
+  alignedData.forEach((dp, i) => {
+    const x = paddingLeft + i * xStep;
+    axisSvg += `<text x="${x}" y="${height - 15}" text-anchor="middle" fill="#60715f" font-size="11">${dp.label}</text>`;
+  });
+
+  let legendSvg = '';
+  groupsData.forEach((gd, idx) => {
+    const y = paddingTop + idx * 25;
+    legendSvg += `<rect x="${paddingLeft + chartWidth + 15}" y="${y}" width="14" height="14" rx="3" fill="${gd.group.color}"/>`;
+    legendSvg += `<text x="${paddingLeft + chartWidth + 35}" y="${y + 11}" text-anchor="start" fill="#1f2a22" font-size="12">${gd.group.name}</text>`;
+  });
+
+  axisSvg += `<text x="${paddingLeft - 30}" y="${paddingTop + chartHeight / 2}" text-anchor="middle" fill="#60715f" font-size="11" transform="rotate(-90 ${paddingLeft - 30} ${paddingTop + chartHeight / 2})">${yAxisLabel || unit}</text>`;
+
+  el.innerHTML = `<svg viewBox="0 0 ${width} ${height}">${axisSvg}${linesSvg}${dotsSvg}${legendSvg}</svg>`;
+}
+
+function drawGroupedBarCompare(selector, alignedData, groupsData, field1, field2, unit1, unit2, label1, label2) {
+  const el = document.querySelector(selector);
+  if (alignedData.length === 0) {
+    el.innerHTML = '<p class="empty">暂无对比数据</p>';
+    return;
+  }
+
+  const width = 650;
+  const height = 260;
+  const paddingLeft = 50;
+  const paddingRight = 20;
+  const paddingTop = 30;
+  const paddingBottom = 50;
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+
+  const groupCount = groupsData.length;
+  const barGroupWidth = Math.min(80, chartWidth / alignedData.length - 10);
+  const barWidth = barGroupWidth / (groupCount * 2 + 1);
+
+  let maxValue = 0;
+  groupsData.forEach(gd => {
+    gd.alignedPoints.forEach(p => {
+      if (p[field1] > maxValue) maxValue = p[field1];
+      if (p[field2] * 20 > maxValue) maxValue = p[field2] * 20;
+    });
+  });
+  maxValue = Math.max(maxValue * 1.2, 1);
+
+  let barsSvg = '';
+  let legendSvg = '';
+
+  alignedData.forEach((dp, dataIndex) => {
+    const groupBaseX = paddingLeft + dataIndex * (chartWidth / alignedData.length) + 5;
+
+    groupsData.forEach((gd, groupIndex) => {
+      const point = dp[`group_${groupIndex}`];
+      const color = gd.group.color;
+
+      if (point) {
+        const value1 = point[field1] || 0;
+        const value2 = (point[field2] || 0) * 20;
+
+        const bar1X = groupBaseX + groupIndex * (barWidth * 2 + 4);
+        const bar2X = bar1X + barWidth;
+
+        const bar1Height = (value1 / maxValue) * chartHeight;
+        const bar2Height = (value2 / maxValue) * chartHeight;
+
+        const bar1Y = paddingTop + chartHeight - bar1Height;
+        const bar2Y = paddingTop + chartHeight - bar2Height;
+
+        barsSvg += `<rect x="${bar1X}" y="${bar1Y}" width="${barWidth - 2}" height="${bar1Height}" rx="3" fill="${color}" opacity="0.9"/>`;
+        barsSvg += `<rect x="${bar2X}" y="${bar2Y}" width="${barWidth - 2}" height="${bar2Height}" rx="3" fill="${color}" opacity="0.5"/>`;
+      }
+    });
+
+    const labelX = groupBaseX + (barGroupWidth - 10) / 2;
+    barsSvg += `<text x="${labelX}" y="${height - 20}" text-anchor="middle" fill="#60715f" font-size="11">${dp.label}</text>`;
+  });
+
+  let axisSvg = '';
+  const yTicks = 5;
+  for (let i = 0; i <= yTicks; i++) {
+    const y = paddingTop + chartHeight - (i / yTicks) * chartHeight;
+    const value1 = (maxValue * i / yTicks).toFixed(0);
+    const value2 = (maxValue * i / yTicks / 20).toFixed(1);
+    axisSvg += `<line x1="${paddingLeft}" y1="${y}" x2="${paddingLeft + chartWidth}" y2="${y}" stroke="#e5eee5" stroke-width="1"/>`;
+    axisSvg += `<text x="${paddingLeft - 8}" y="${y + 4}" text-anchor="end" fill="#2f855a" font-size="11">${value1}${unit1}</text>`;
+    axisSvg += `<text x="${paddingLeft + chartWidth + 8}" y="${y + 4}" text-anchor="start" fill="#f59e0b" font-size="11">${value2}${unit2}</text>`;
+  }
+
+  legendSvg += `<rect x="${paddingLeft + 20}" y="${8}" width="14" height="14" rx="3" fill="#2f855a" opacity="0.9"/>`;
+  legendSvg += `<text x="${paddingLeft + 40}" y="${19}" text-anchor="start" fill="#1f2a22" font-size="12">${label1}</text>`;
+  legendSvg += `<rect x="${paddingLeft + 120}" y="${8}" width="14" height="14" rx="3" fill="#f59e0b" opacity="0.5"/>`;
+  legendSvg += `<text x="${paddingLeft + 140}" y="${19}" text-anchor="start" fill="#1f2a22" font-size="12">${label2}</text>`;
+
+  groupsData.forEach((gd, idx) => {
+    const x = paddingLeft + 240 + idx * 130;
+    legendSvg += `<rect x="${x}" y="${8}" width="14" height="14" rx="3" fill="${gd.group.color}"/>`;
+    legendSvg += `<text x="${x + 20}" y="${19}" text-anchor="start" fill="#1f2a22" font-size="12">${gd.group.name}</text>`;
+  });
+
+  el.innerHTML = `<svg viewBox="0 0 ${width} ${height}">${axisSvg}${barsSvg}${legendSvg}</svg>`;
+}
+
+function renderExperimentGroupsForm() {
+  const plants = [...new Set(records.map(r => r.plant))].sort();
+
+  if (experimentGroups.length === 0) {
+    experimentGroups.push({
+      id: crypto.randomUUID(),
+      name: '',
+      type: experimentFormType,
+      plantName: plants[0] || '',
+      dateStart: '',
+      dateEnd: '',
+      color: EXPERIMENT_COLORS[0]
+    });
+  }
+
+  experimentGroupsList.innerHTML = experimentGroups.map((group, index) => {
+    const color = group.color || EXPERIMENT_COLORS[index % EXPERIMENT_COLORS.length];
+    const typeOptions = experimentFormType === 'plant'
+      ? `<select name="plantName_${index}" required>
+           <option value="">选择植物</option>
+           ${plants.map(p => `<option value="${p}" ${group.plantName === p ? 'selected' : ''}>${p}</option>`).join('')}
+         </select>`
+      : `<div class="dateRangeInputs">
+           <select name="plantName_${index}" required>
+             <option value="">选择植物</option>
+             ${plants.map(p => `<option value="${p}" ${group.plantName === p ? 'selected' : ''}>${p}</option>`).join('')}
+           </select>
+           <input type="date" name="dateStart_${index}" placeholder="开始日期" value="${group.dateStart}" required />
+           <input type="date" name="dateEnd_${index}" placeholder="结束日期" value="${group.dateEnd}" required />
+         </div>`;
+
+    return `
+      <div class="experimentGroupItem" data-group-index="${index}">
+        <div class="experimentGroupHead">
+          <div class="experimentGroupColor" style="background: ${color}"></div>
+          <input type="text" name="groupName_${index}" placeholder="实验组名称" value="${group.name}" required />
+          <button type="button" class="experimentRemoveGroup" data-remove-group="${index}" ${experimentGroups.length <= 2 ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>×</button>
+        </div>
+        <div class="experimentGroupBody">
+          ${typeOptions}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  document.querySelectorAll('[data-remove-group]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.removeGroup);
+      experimentGroups.splice(idx, 1);
+      renderExperimentGroupsForm();
+    });
+  });
+}
+
+function getExperimentFormData() {
+  const formData = new FormData(experimentForm);
+  const data = {
+    name: formData.get('name'),
+    description: formData.get('description'),
+    type: experimentFormType,
+    groups: []
+  };
+
+  experimentGroups.forEach((group, index) => {
+    const name = formData.get(`groupName_${index}`);
+    const plantName = formData.get(`plantName_${index}`);
+
+    const groupData = {
+      id: group.id,
+      name: name || `实验组${index + 1}`,
+      type: experimentFormType,
+      plantName,
+      color: group.color || EXPERIMENT_COLORS[index % EXPERIMENT_COLORS.length]
+    };
+
+    if (experimentFormType === 'dateRange') {
+      groupData.dateStart = formData.get(`dateStart_${index}`);
+      groupData.dateEnd = formData.get(`dateEnd_${index}`);
+    }
+
+    data.groups.push(groupData);
+  });
+
+  return data;
+}
+
+function validateExperimentForm(data) {
+  if (!data.name || data.name.trim() === '') {
+    alert('请输入实验名称');
+    return false;
+  }
+  if (data.groups.length < 2) {
+    alert('至少需要2个实验组才能进行对比');
+    return false;
+  }
+
+  const plantNames = new Set();
+  for (const group of data.groups) {
+    if (!group.plantName) {
+      alert(`请为「${group.name}」选择植物`);
+      return false;
+    }
+    if (group.type === 'dateRange') {
+      if (!group.dateStart || !group.dateEnd) {
+        alert(`请为「${group.name}」选择日期范围`);
+        return false;
+      }
+      if (group.dateStart > group.dateEnd) {
+        alert(`「${group.name}」的开始日期不能晚于结束日期`);
+        return false;
+      }
+    }
+
+    const groupRecords = getGroupRecords(group);
+    if (groupRecords.length === 0) {
+      alert(`「${group.name}」没有找到任何记录，请检查选择条件`);
+      return false;
+    }
+
+    const key = group.type === 'plant' ? group.plantName : `${group.plantName}-${group.dateStart}-${group.dateEnd}`;
+    if (plantNames.has(key)) {
+      alert(`存在重复的实验组：${group.name}`);
+      return false;
+    }
+    plantNames.add(key);
+  }
+
+  return true;
+}
+
+function saveExperiment(data) {
+  if (experimentEditingId) {
+    experiments = experiments.map(exp =>
+      exp.id === experimentEditingId ? { ...exp, ...data, updatedAt: formatDate(new Date()) } : exp
+    );
+  } else {
+    experiments.unshift({
+      ...data,
+      id: crypto.randomUUID(),
+      createdAt: formatDate(new Date())
+    });
+  }
+  saveExperiments();
+}
+
+function deleteExperiment(expId) {
+  const exp = experiments.find(e => e.id === expId);
+  if (!exp) return;
+
+  if (confirm(`确定要删除实验「${exp.name}」吗？`)) {
+    experiments = experiments.filter(e => e.id !== expId);
+    saveExperiments();
+    if (experimentViewingId === expId) {
+      experimentViewingId = null;
+    }
+    renderExperiments();
+  }
+}
+
+function viewExperiment(expId) {
+  experimentViewingId = expId;
+  renderExperiments();
+}
+
+function editExperiment(expId) {
+  const exp = experiments.find(e => e.id === expId);
+  if (!exp) return;
+
+  experimentEditingId = expId;
+  experimentFormType = exp.type;
+  experimentGroups = exp.groups.map(g => ({ ...g }));
+  experimentFormTitle.textContent = '编辑对比实验';
+  experimentSaveBtn.textContent = '保存修改';
+  experimentCancelBtn.style.display = 'inline-block';
+
+  experimentForm.elements.name.value = exp.name;
+  experimentForm.elements.description.value = exp.description || '';
+  experimentForm.elements.expType.value = exp.type;
+
+  renderExperimentGroupsForm();
+  experimentForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderExperimentList() {
+  if (experiments.length === 0) {
+    experimentList.innerHTML = '<p class="empty">暂无对比实验，创建第一个实验开始对比吧</p>';
+    return;
+  }
+
+  experimentList.innerHTML = `
+    <h4 class="experimentListTitle">已有实验（${experiments.length}）</h4>
+    <div class="experimentCards">
+      ${experiments.map(exp => {
+        const metrics = exp.groups.map(group => {
+          const records = getGroupRecords(group);
+          return calculateGrowthMetrics(group, records);
+        });
+
+        return `
+          <div class="experimentCard">
+            <div class="experimentCardHead">
+              <div class="experimentCardTitle">
+                <h5>${exp.name}</h5>
+                <span class="experimentTypeTag">${exp.type === 'plant' ? '植物对比' : '时段对比'}</span>
+              </div>
+              <span class="experimentDate">${exp.createdAt}</span>
+            </div>
+            ${exp.description ? `<p class="experimentCardDesc">${exp.description}</p>` : ''}
+            <div class="experimentCardGroups">
+              ${exp.groups.map((g, idx) => `
+                <div class="experimentCardGroup">
+                  <span class="experimentGroupDot" style="background: ${g.color}"></span>
+                  <span class="experimentGroupName">${g.name}</span>
+                  <span class="experimentGroupMeta">${g.plantName}${g.dateStart ? ` · ${g.dateStart.slice(5)}~${g.dateEnd.slice(5)}` : ''} · ${metrics[idx].recordCount}条</span>
+                  <span class="experimentGroupGrowth">📏+${metrics[idx].heightGrowth}cm 🍃+${metrics[idx].leavesGrowth}片</span>
+                </div>
+              `).join('')}
+            </div>
+            <div class="experimentCardActions">
+              <button class="experimentViewBtn" data-view="${exp.id}">查看对比</button>
+              <button class="experimentEditBtn" data-edit="${exp.id}">编辑</button>
+              <button class="experimentDelBtn" data-del="${exp.id}">删除</button>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+
+  document.querySelectorAll('[data-view]').forEach(btn => {
+    btn.addEventListener('click', () => viewExperiment(btn.dataset.view));
+  });
+  document.querySelectorAll('[data-edit]').forEach(btn => {
+    btn.addEventListener('click', () => editExperiment(btn.dataset.edit));
+  });
+  document.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', () => deleteExperiment(btn.dataset.del));
+  });
+}
+
+function renderExperimentView() {
+  const exp = experiments.find(e => e.id === experimentViewingId);
+  if (!exp) {
+    experimentView.style.display = 'none';
+    return;
+  }
+
+  experimentView.style.display = 'block';
+  experimentAlignModeSelect.value = experimentAlignMode;
+
+  const { alignedData, groupsData } = alignExperimentData(exp, experimentAlignMode);
+
+  const groupMetrics = groupsData.map(gd => calculateGrowthMetrics(gd.group, gd.records));
+
+  experimentViewInfo.innerHTML = `
+    <div class="experimentViewHeader">
+      <div>
+        <h3>${exp.name}</h3>
+        <p class="experimentViewDesc">${exp.description || '暂无实验说明'}</p>
+        <div class="experimentViewTags">
+          <span class="experimentTypeTag">${exp.type === 'plant' ? '植物对比' : '时段对比'}</span>
+          <span>共 ${exp.groups.length} 组</span>
+          <span>${alignedData.length} 个数据点</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="experimentMetricsGrid">
+      ${groupsData.map((gd, idx) => {
+        const m = groupMetrics[idx];
+        return `
+          <div class="experimentMetricCard" style="border-left: 4px solid ${gd.group.color}">
+            <div class="experimentMetricHead">
+              <span class="experimentMetricDot" style="background: ${gd.group.color}"></span>
+              <strong>${gd.group.name}</strong>
+            </div>
+            <div class="experimentMetricStats">
+              <div class="experimentMetricItem">
+                <span class="metricLabel">高度增长</span>
+                <span class="metricValue">+${m.heightGrowth}cm</span>
+                <span class="metricRate">${m.heightGrowthRate}cm/天</span>
+              </div>
+              <div class="experimentMetricItem">
+                <span class="metricLabel">叶片增长</span>
+                <span class="metricValue">+${m.leavesGrowth}片</span>
+                <span class="metricRate">${m.leavesGrowthRate}片/天</span>
+              </div>
+              <div class="experimentMetricItem">
+                <span class="metricLabel">累计浇水</span>
+                <span class="metricValue">${m.totalWater}ml</span>
+                <span class="metricRate">${m.avgWater}ml/次</span>
+              </div>
+              <div class="experimentMetricItem">
+                <span class="metricLabel">累计光照</span>
+                <span class="metricValue">${m.totalLight}h</span>
+                <span class="metricRate">${m.avgLight}h/天</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+
+    <div class="experimentDataNotice" id="experimentDataNotice"></div>
+  `;
+
+  const noticeEl = document.querySelector('#experimentDataNotice');
+  const issues = [];
+  groupsData.forEach((gd, idx) => {
+    if (gd.records.length < 2) {
+      issues.push(`「${gd.group.name}」记录不足2条，增长率计算可能不准确`);
+    }
+    const missingPoints = alignedData.length - gd.alignedPoints.length;
+    if (missingPoints > 0) {
+      issues.push(`「${gd.group.name}」缺失 ${missingPoints} 个时间点的数据`);
+    }
+  });
+
+  if (issues.length > 0) {
+    noticeEl.innerHTML = `
+      <div class="dataNotice">
+        <span class="dataNoticeIcon">⚠️</span>
+        <div class="dataNoticeContent">
+          <strong>数据提示</strong>
+          <ul>${issues.map(i => `<li>${i}</li>`).join('')}</ul>
+        </div>
+      </div>
+    `;
+  }
+
+  experimentCharts.innerHTML = `
+    <div class="panel">
+      <div class="panelHead"><h3>📏 高度增长对比</h3></div>
+      <div class="chart" id="expHeightChart"></div>
+    </div>
+    <div class="panel">
+      <div class="panelHead"><h3>🍃 叶片数量对比</h3></div>
+      <div class="chart" id="expLeafChart"></div>
+    </div>
+    <div class="panel">
+      <div class="panelHead"><h3>💧 ☀️ 浇水与光照对比</h3></div>
+      <div class="chart" id="expCareChart"></div>
+    </div>
+  `;
+
+  drawMultiLineCompare('#expHeightChart', alignedData, groupsData, 'height', 'cm', '高度 (cm)');
+  drawMultiLineCompare('#expLeafChart', alignedData, groupsData, 'leaves', '片', '叶片数');
+  drawGroupedBarCompare('#expCareChart', alignedData, groupsData, 'water', 'light', 'ml', 'h', '浇水量(ml)', '光照(h)');
+}
+
+function renderExperiments() {
+  document.querySelector('#experimentBadge').textContent = `共 ${experiments.length} 个实验`;
+  document.querySelector('#experimentBody').style.display = experimentExpanded ? 'block' : 'none';
+  experimentToggle.textContent = experimentExpanded ? '收起' : '展开';
+
+  if (experimentViewingId) {
+    experimentForm.style.display = 'none';
+    experimentList.style.display = 'none';
+    renderExperimentView();
+  } else {
+    experimentForm.style.display = 'grid';
+    experimentView.style.display = 'none';
+    experimentList.style.display = 'block';
+    renderExperimentGroupsForm();
+    renderExperimentList();
+  }
+}
+
 function renderGoalReminder() {
   const overdueGoals = getOverdueGoalsWithDetails();
   const reminderEl = document.querySelector('#goalReminder');
@@ -1402,6 +2251,76 @@ archiveCancelBtn.addEventListener('click', () => {
   archiveForm.reset();
   archiveCancelBtn.style.display = 'none';
   archiveFormTitle.textContent = '新增植物档案';
+});
+
+experimentToggle.addEventListener('click', () => {
+  experimentExpanded = !experimentExpanded;
+  renderExperiments();
+});
+
+experimentAddGroupBtn.addEventListener('click', () => {
+  const plants = [...new Set(records.map(r => r.plant))].sort();
+  experimentGroups.push({
+    id: crypto.randomUUID(),
+    name: '',
+    type: experimentFormType,
+    plantName: plants[0] || '',
+    dateStart: '',
+    dateEnd: '',
+    color: EXPERIMENT_COLORS[experimentGroups.length % EXPERIMENT_COLORS.length]
+  });
+  renderExperimentGroupsForm();
+});
+
+experimentCancelBtn.addEventListener('click', () => {
+  experimentEditingId = null;
+  experimentForm.reset();
+  experimentGroups = [];
+  experimentFormType = 'plant';
+  experimentForm.elements.expType[0].checked = true;
+  experimentCancelBtn.style.display = 'none';
+  experimentFormTitle.textContent = '创建对比实验';
+  experimentSaveBtn.textContent = '创建实验';
+  renderExperimentGroupsForm();
+});
+
+experimentForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const data = getExperimentFormData();
+  if (!validateExperimentForm(data)) return;
+  saveExperiment(data);
+  experimentEditingId = null;
+  experimentForm.reset();
+  experimentGroups = [];
+  experimentCancelBtn.style.display = 'none';
+  experimentFormTitle.textContent = '创建对比实验';
+  experimentSaveBtn.textContent = '创建实验';
+  renderExperiments();
+});
+
+document.querySelectorAll('input[name="expType"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    experimentFormType = e.target.value;
+    experimentGroups = experimentGroups.map(g => ({
+      ...g,
+      type: experimentFormType,
+      dateStart: experimentFormType === 'dateRange' ? (g.dateStart || '') : undefined,
+      dateEnd: experimentFormType === 'dateRange' ? (g.dateEnd || '') : undefined
+    }));
+    renderExperimentGroupsForm();
+  });
+});
+
+experimentBackBtn.addEventListener('click', () => {
+  experimentViewingId = null;
+  renderExperiments();
+});
+
+experimentAlignModeSelect.addEventListener('change', (e) => {
+  experimentAlignMode = e.target.value;
+  if (experimentViewingId) {
+    renderExperimentView();
+  }
 });
 
 archiveToggle.addEventListener('click', () => {
@@ -2278,6 +3197,7 @@ function render() {
   }));
   renderCareCalendar();
   renderTimeline();
+  renderExperiments();
 }
 
 function drawLine(selector, data, unit, color, goal) {
