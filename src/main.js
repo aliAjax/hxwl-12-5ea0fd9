@@ -274,6 +274,7 @@ const PhotoManager = {
 };
 
 let pendingPhotoUpload = null;
+let photoRemovedByUser = false;
 
 PhotoStorage.init()
   .then(() => {
@@ -2704,6 +2705,7 @@ photoRemoveBtn.addEventListener('click', (e) => {
     PhotoManager.deleteByPhotoUrl(pendingPhotoUpload.url).catch(err => console.warn('清理临时图片失败:', err));
   }
   pendingPhotoUpload = null;
+  photoRemovedByUser = true;
   photoPreviewContainer.style.display = 'none';
   photoUploadArea.querySelector('.photoUploadPlaceholder').style.display = 'flex';
   photoFileInput.value = '';
@@ -2764,7 +2766,14 @@ form.addEventListener('submit', async (event) => {
     }
   } else if (editingId) {
     const oldRecord = records.find(r => r.id === editingId);
-    photoUrl = oldRecord ? (oldRecord.photo || '') : '';
+    if (photoRemovedByUser) {
+      photoUrl = '';
+      if (oldRecord && oldRecord.photo && PhotoManager.isLocalImage(oldRecord.photo)) {
+        await PhotoManager.deleteByPhotoUrl(oldRecord.photo).catch(err => console.warn('清理已移除的旧图片失败:', err));
+      }
+    } else {
+      photoUrl = oldRecord ? (oldRecord.photo || '') : '';
+    }
   }
 
   const item = {
@@ -2780,6 +2789,7 @@ form.addEventListener('submit', async (event) => {
   records = editingId ? records.map((record) => (record.id === editingId ? item : record)) : [item, ...records];
   editingId = null;
   pendingPhotoUpload = null;
+  photoRemovedByUser = false;
   form.reset();
   photoPreviewContainer.style.display = 'none';
   photoUploadArea.querySelector('.photoUploadPlaceholder').style.display = 'flex';
@@ -3825,6 +3835,7 @@ function render() {
     });
 
     pendingPhotoUpload = null;
+    photoRemovedByUser = false;
     if (record.photo) {
       if (PhotoManager.isLocalImage(record.photo)) {
         try {
