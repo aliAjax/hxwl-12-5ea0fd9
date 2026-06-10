@@ -3588,29 +3588,36 @@ function bindTimelinePhotoEvents() {
   loadTimelineAnnotationBadges();
 }
 
+async function getAnnotationCount(photoUrl, recordId) {
+  const byPhoto = [];
+  const byRecord = [];
+  if (PhotoManager.isLocalImage(photoUrl)) {
+    const photoId = PhotoManager.getImageId(photoUrl);
+    if (photoId) {
+      try { byPhoto.push(...await AnnotationStorage.getByPhotoId(photoId)); } catch {}
+    }
+  }
+  if (recordId) {
+    try { byRecord.push(...await AnnotationStorage.getByRecordId(recordId)); } catch {}
+  }
+  const seen = new Set();
+  let count = 0;
+  for (const ann of [...byPhoto, ...byRecord]) {
+    if (!seen.has(ann.id)) {
+      seen.add(ann.id);
+      count++;
+    }
+  }
+  return count;
+}
+
 async function loadTimelineAnnotationBadges() {
   const badges = document.querySelectorAll('[data-role="timeline-ann-badge"]');
   for (const badge of badges) {
     const photoUrl = badge.dataset.photo;
     const recordId = badge.dataset.recordId;
     if (!photoUrl) continue;
-
-    let count = 0;
-    try {
-      if (PhotoManager.isLocalImage(photoUrl)) {
-        const photoId = PhotoManager.getImageId(photoUrl);
-        if (photoId) {
-          const anns = await AnnotationStorage.getByPhotoId(photoId);
-          count = anns.length;
-        }
-      } else if (recordId) {
-        const anns = await AnnotationStorage.getByRecordId(recordId);
-        count = anns.length;
-      }
-    } catch (err) {
-      console.warn('加载标注数量失败:', err);
-    }
-
+    const count = await getAnnotationCount(photoUrl, recordId);
     if (count > 0) {
       badge.style.display = 'flex';
       const countEl = badge.querySelector('.annBadgeCount');
@@ -3636,10 +3643,15 @@ async function openAnnotationModal(photoUrl, recordId) {
 
     annotationImage.src = resolvedUrl;
     annotationImage.onload = async () => {
-      if (annotationPhotoId) {
-        annotationList = await AnnotationStorage.getByPhotoId(annotationPhotoId);
-      } else {
-        annotationList = [];
+      const byPhoto = annotationPhotoId ? await AnnotationStorage.getByPhotoId(annotationPhotoId) : [];
+      const byRecord = annotationRecordId ? await AnnotationStorage.getByRecordId(annotationRecordId) : [];
+      const seen = new Set();
+      annotationList = [];
+      for (const ann of [...byPhoto, ...byRecord]) {
+        if (!seen.has(ann.id)) {
+          seen.add(ann.id);
+          annotationList.push(ann);
+        }
       }
       renderAnnotations();
       renderAnnotationList();
@@ -3788,6 +3800,8 @@ async function saveCurrentAnnotation() {
     cancelEditAnnotation();
     renderAnnotations();
     renderAnnotationList();
+    loadTimelineAnnotationBadges();
+    loadRecordAnnotationBadges();
   } catch (err) {
     console.error('保存标注失败:', err);
   }
@@ -3804,6 +3818,8 @@ async function deleteCurrentAnnotation() {
     cancelEditAnnotation();
     renderAnnotations();
     renderAnnotationList();
+    loadTimelineAnnotationBadges();
+    loadRecordAnnotationBadges();
   } catch (err) {
     console.error('删除标注失败:', err);
   }
@@ -3891,22 +3907,17 @@ async function endAnnotationDraw(e) {
   };
 
   try {
-    if (annotationPhotoId) {
-      const saved = await AnnotationStorage.save(newAnn);
-      annotationList.push(saved);
-    } else {
-      annotationList.push(newAnn);
-    }
+    const saved = await AnnotationStorage.save(newAnn);
+    annotationList.push(saved);
 
-    annotationEditingId = newAnn.id;
+    annotationEditingId = saved.id;
     annotationTempRect = null;
 
     renderAnnotations();
     renderAnnotationList();
-
-    if (annotationPhotoId) {
-      editAnnotation(newAnn.id);
-    }
+    editAnnotation(saved.id);
+    loadTimelineAnnotationBadges();
+    loadRecordAnnotationBadges();
   } catch (err) {
     console.error('创建标注失败:', err);
     annotationTempRect = null;
@@ -4530,25 +4541,11 @@ async function loadRecordAnnotationBadges() {
     const photoUrl = badge.dataset.photo;
     const recordId = badge.dataset.recordId;
     if (!photoUrl) continue;
-
-    let count = 0;
-    try {
-      if (PhotoManager.isLocalImage(photoUrl)) {
-        const photoId = PhotoManager.getImageId(photoUrl);
-        if (photoId) {
-          const anns = await AnnotationStorage.getByPhotoId(photoId);
-          count = anns.length;
-        }
-      } else if (recordId) {
-        const anns = await AnnotationStorage.getByRecordId(recordId);
-        count = anns.length;
-      }
-    } catch (err) {
-      console.warn('加载标注数量失败:', err);
-    }
-
+    const count = await getAnnotationCount(photoUrl, recordId);
     if (count > 0) {
       badge.style.display = 'flex';
+      const countEl = badge.querySelector('.annBadgeCount');
+      if (countEl) countEl.textContent = count;
     }
   }
 }
@@ -4658,7 +4655,7 @@ function render() {
                 alt="缩略图"
               />
               <span class="recordAnnBadge" data-role="record-ann-badge" data-record-id="${record.id}" data-photo="${record.photo}" style="display:none;">
-                📍
+                📍 <span class="annBadgeCount">0</span>
               </span>
             </div>
           ` : ''}
