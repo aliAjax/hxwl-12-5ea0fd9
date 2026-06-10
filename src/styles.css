@@ -269,6 +269,34 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
   border-radius: 12px;
 }
 
+.care-light {
+  display: inline-block;
+  padding: 4px 10px;
+  background: #fef3c7;
+  border-radius: 12px;
+  color: #92400e;
+  margin-left: 6px;
+}
+
+.care-item-notes {
+  grid-column: 1 / -1;
+  padding: 8px 12px;
+  background: #f0fff4;
+  border: 1px solid #c6f6d5;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #276749;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.template-badge {
+  display: inline-block;
+  font-size: 14px;
+  cursor: help;
+  margin-left: 4px;
+}
+
 .care-item-actions {
   display: flex;
   gap: 6px;
@@ -772,6 +800,49 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
   gap: 10px;
 }
 
+.careTemplateSection {
+  background: #f0fff4;
+  border: 1px solid #c6f6d5;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.careTemplateTitle {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #276749;
+  font-weight: 600;
+}
+
+.careTemplateGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.careTemplateItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.careTemplateItem label {
+  font-size: 12px;
+  color: #276749;
+  font-weight: 500;
+}
+
+.careTemplateItem input {
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  .careTemplateGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .archiveCancel {
   background: #e5e7eb;
   color: #4b5563;
@@ -873,6 +944,52 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
   border-radius: 6px;
 }
 
+.plantTemplateSection {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: #f0fff4;
+  border-radius: 6px;
+  border: 1px solid #c6f6d5;
+}
+
+.templateLabel {
+  font-size: 11px;
+  color: #276749;
+  font-weight: 600;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.templateTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.templateTag {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.template-water {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.template-amount {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.template-light {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .archiveCardActions {
   display: flex;
   gap: 8px;
@@ -938,6 +1055,22 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
   line-height: 1.5;
 }
 
+.notesInsertBtn {
+  background: #2f855a;
+  color: white;
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.notesInsertBtn:hover {
+  background: #276749;
+}
+
 @media (max-width: 900px) {
   .hero, .layout, .cards, .pair, .record {
     display: block;
@@ -953,6 +1086,9 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
     gap: 8px;
   }
   .care-item-actions { justify-content: flex-start; }
+  .care-item-notes {
+    grid-column: 1;
+  }
   .timelineHeader {
     flex-direction: column;
     align-items: flex-start;

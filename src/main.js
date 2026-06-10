@@ -296,9 +296,20 @@ const seed = [
   { id: crypto.randomUUID(), plant: '小番茄苗', date: '2026-06-04', height: 9.5, leaves: 8, water: 70, light: 7, photo: '', state: '茎秆直立，子叶健康' }
 ];
 
+function migratePlantArchiveData(archive) {
+  return archive.map((plant) => ({
+    waterIntervalDays: null,
+    waterAmount: null,
+    lightMin: null,
+    lightMax: null,
+    defaultNotes: '',
+    ...plant
+  }));
+}
+
 let records = JSON.parse(localStorage.getItem(key) || 'null') || seed;
 let careCompleted = JSON.parse(localStorage.getItem(careKey) || 'null') || {};
-let plantArchive = JSON.parse(localStorage.getItem(archiveKey) || 'null') || [];
+let plantArchive = migratePlantArchiveData(JSON.parse(localStorage.getItem(archiveKey) || 'null') || []);
 let plantGoals = JSON.parse(localStorage.getItem(goalsKey) || 'null') || [];
 let editingId = null;
 let careExpanded = true;
@@ -361,7 +372,28 @@ document.querySelector('#app').innerHTML = `
             <input name="acquisitionDate" type="date" />
             <input name="location" placeholder="摆放位置" />
           </div>
-          <textarea name="defaultNotes" placeholder="默认养护备注"></textarea>
+          <div class="careTemplateSection">
+            <h4 class="careTemplateTitle">🌱 养护模板设置</h4>
+            <div class="careTemplateGrid">
+              <div class="careTemplateItem">
+                <label>浇水间隔（天）</label>
+                <input name="waterIntervalDays" type="number" min="1" step="1" placeholder="例如：3" />
+              </div>
+              <div class="careTemplateItem">
+                <label>单次浇水量（ml）</label>
+                <input name="waterAmount" type="number" min="0" step="10" placeholder="例如：100" />
+              </div>
+              <div class="careTemplateItem">
+                <label>理想光照（最少小时）</label>
+                <input name="lightMin" type="number" min="0" step="0.5" placeholder="例如：3" />
+              </div>
+              <div class="careTemplateItem">
+                <label>理想光照（最多小时）</label>
+                <input name="lightMax" type="number" min="0" step="0.5" placeholder="例如：6" />
+              </div>
+            </div>
+          </div>
+          <textarea name="defaultNotes" placeholder="默认养护备注（保存生长记录时自动带出）"></textarea>
           <div class="archiveFormActions">
             <button type="submit" class="primary" id="archiveSaveBtn">保存档案</button>
             <button type="button" class="archiveCancel" id="archiveCancelBtn" style="display: none;">取消</button>
@@ -695,16 +727,16 @@ function saveExperiments() {
   localStorage.setItem(experimentsKey, JSON.stringify(experiments));
 }
 
-const EXPORT_VERSION = '1.0';
+const EXPORT_VERSION = '1.1';
 const EXPORT_APP_ID = 'hxwl-12';
 
 const RECORD_SCHEMA = ['id', 'plant', 'date', 'height', 'leaves', 'water', 'light', 'photo', 'state'];
 const RECORD_REQUIRED_FIELDS = ['id', 'plant', 'date', 'height', 'leaves', 'water', 'light', 'state'];
 const RECORD_OPTIONAL_FIELDS = ['photo'];
 
-const ARCHIVE_SCHEMA = ['id', 'nickname', 'variety', 'acquisitionDate', 'location', 'defaultNotes', 'autoImported', 'createdAt'];
+const ARCHIVE_SCHEMA = ['id', 'nickname', 'variety', 'acquisitionDate', 'location', 'defaultNotes', 'waterIntervalDays', 'waterAmount', 'lightMin', 'lightMax', 'autoImported', 'createdAt'];
 const ARCHIVE_REQUIRED_FIELDS = ['id', 'nickname'];
-const ARCHIVE_OPTIONAL_FIELDS = ['variety', 'acquisitionDate', 'location', 'defaultNotes', 'autoImported', 'createdAt'];
+const ARCHIVE_OPTIONAL_FIELDS = ['variety', 'acquisitionDate', 'location', 'defaultNotes', 'waterIntervalDays', 'waterAmount', 'lightMin', 'lightMax', 'autoImported', 'createdAt'];
 
 const GOAL_SCHEMA = ['id', 'plantName', 'targetHeight', 'targetLeaves', 'targetDate', 'createdAt', 'achieved', 'achievedAt', 'startHeight', 'startLeaves'];
 const GOAL_REQUIRED_FIELDS = ['id', 'plantName', 'targetHeight', 'targetLeaves', 'targetDate'];
@@ -1588,16 +1620,18 @@ function performImport() {
       const missingRequired = ARCHIVE_REQUIRED_FIELDS.filter(field => !(field in plant));
       if (missingRequired.length > 0) return;
 
+      const migratedPlant = migratePlantArchiveData([plant])[0];
+
       const hasId = existingArchiveIds.has(plant.id);
       if (strategy === 'skip' && hasId) return;
       if (strategy === 'overwrite' && hasId) {
-        plantArchive = plantArchive.map(p => p.id === plant.id ? { ...plant } : p);
+        plantArchive = plantArchive.map(p => p.id === plant.id ? { ...migratedPlant } : p);
       } else if (strategy === 'duplicate' && hasId) {
-        plantArchive.push({ ...plant, id: crypto.randomUUID() });
+        plantArchive.push({ ...migratedPlant, id: crypto.randomUUID() });
       } else {
         const existsByNickname = plantArchive.find(p => p.nickname === plant.nickname);
         if (!existsByNickname) {
-          plantArchive.push({ ...plant });
+          plantArchive.push({ ...migratedPlant });
         }
       }
       importedArchive++;
@@ -2530,6 +2564,10 @@ function syncPlantsFromRecords() {
         acquisitionDate: '',
         location: '',
         defaultNotes: '',
+        waterIntervalDays: null,
+        waterAmount: null,
+        lightMin: null,
+        lightMax: null,
         autoImported: true,
         createdAt: formatDate(new Date())
       });
@@ -2551,19 +2589,64 @@ function updatePlantSelect() {
 function showPlantNotesHint(plantName) {
   const plant = plantArchive.find((p) => p.nickname === plantName);
   if (plant && plant.defaultNotes) {
-    plantNotesHint.innerHTML = `<span class="notesHintIcon">📝</span><span class="notesHintText">养护备注：${plant.defaultNotes}</span>`;
-    plantNotesHint.style.display = 'block';
+    const stateTextarea = form.elements.state;
+    const hasContent = stateTextarea && stateTextarea.value.trim() !== '';
+    const isEditing = editingId !== null;
+
+    let insertBtn = '';
+    if (hasContent && !isEditing) {
+      insertBtn = `<button type="button" class="notesInsertBtn" id="notesInsertBtn" data-notes="${encodeURIComponent(plant.defaultNotes)}">插入备注</button>`;
+    }
+
+    plantNotesHint.innerHTML = `<span class="notesHintIcon">📝</span><span class="notesHintText">养护备注：${plant.defaultNotes}</span>${insertBtn}`;
+    plantNotesHint.style.display = 'flex';
+
+    if (stateTextarea && !hasContent && !isEditing) {
+      stateTextarea.value = plant.defaultNotes;
+    }
+
+    const insertBtnEl = document.querySelector('#notesInsertBtn');
+    if (insertBtnEl) {
+      insertBtnEl.addEventListener('click', () => {
+        const notes = decodeURIComponent(insertBtnEl.dataset.notes);
+        if (stateTextarea) {
+          const currentValue = stateTextarea.value;
+          const separator = currentValue.trim() ? '\n\n' : '';
+          stateTextarea.value = currentValue + separator + notes;
+          stateTextarea.focus();
+        }
+      });
+    }
   } else {
     plantNotesHint.style.display = 'none';
   }
 }
 
+function parseOptionalNumber(value) {
+  if (value === '' || value === null || value === undefined) return null;
+  const num = Number(value);
+  return isNaN(num) ? null : num;
+}
+
 archiveForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(archiveForm).entries());
+  const templateData = {
+    waterIntervalDays: parseOptionalNumber(data.waterIntervalDays),
+    waterAmount: parseOptionalNumber(data.waterAmount),
+    lightMin: parseOptionalNumber(data.lightMin),
+    lightMax: parseOptionalNumber(data.lightMax)
+  };
+  const cleanData = { ...data, ...templateData };
+
+  if (templateData.lightMin !== null && templateData.lightMax !== null && templateData.lightMin > templateData.lightMax) {
+    alert('理想光照范围：最小值不能大于最大值');
+    return;
+  }
+
   if (archiveEditingId) {
     plantArchive = plantArchive.map((p) =>
-      p.id === archiveEditingId ? { ...p, ...data, autoImported: false } : p
+      p.id === archiveEditingId ? { ...p, ...cleanData, autoImported: false } : p
     );
   } else {
     const exists = plantArchive.find((p) => p.nickname === data.nickname);
@@ -2572,7 +2655,7 @@ archiveForm.addEventListener('submit', (event) => {
       return;
     }
     plantArchive.push({
-      ...data,
+      ...cleanData,
       id: crypto.randomUUID(),
       autoImported: false,
       createdAt: formatDate(new Date())
@@ -2585,6 +2668,7 @@ archiveForm.addEventListener('submit', (event) => {
   saveArchive();
   renderArchive();
   updatePlantSelect();
+  renderCareCalendar();
 });
 
 archiveCancelBtn.addEventListener('click', () => {
@@ -2894,29 +2978,55 @@ function daysBetween(date1, date2) {
 
 function getPlantCareInfo() {
   const today = formatDate(new Date());
-  const plants = [...new Set(records.map((r) => r.plant))];
+  const recordPlants = [...new Set(records.map((r) => r.plant))];
+  const templatePlants = plantArchive
+    .filter((p) => p.waterIntervalDays !== null || p.waterAmount !== null)
+    .map((p) => p.nickname);
+  const allPlants = [...new Set([...recordPlants, ...templatePlants])];
   const result = [];
 
-  plants.forEach((plant) => {
+  allPlants.forEach((plant) => {
+    const plantInfo = plantArchive.find((p) => p.nickname === plant);
+    const hasTemplate = plantInfo && (plantInfo.waterIntervalDays !== null || plantInfo.waterAmount !== null);
+
     const plantRecords = records
       .filter((r) => r.plant === plant && r.water > 0)
       .sort((a, b) => a.date.localeCompare(b.date));
 
-    if (plantRecords.length === 0) return;
+    let avgInterval, avgWater, lastWaterDate, lastRecord, sourceRecordId;
 
-    const intervals = [];
-    for (let i = 1; i < plantRecords.length; i++) {
-      const diff = daysBetween(plantRecords[i - 1].date, plantRecords[i].date);
-      if (diff > 0) intervals.push(diff);
+    if (plantRecords.length > 0) {
+      const intervals = [];
+      for (let i = 1; i < plantRecords.length; i++) {
+        const diff = daysBetween(plantRecords[i - 1].date, plantRecords[i].date);
+        if (diff > 0) intervals.push(diff);
+      }
+
+      avgInterval = intervals.length > 0
+        ? Math.round(intervals.reduce((a, b) => a + b, 0) / intervals.length)
+        : 3;
+      avgWater = Math.round(plantRecords.reduce((a, b) => a + b.water, 0) / plantRecords.length);
+
+      lastRecord = plantRecords[plantRecords.length - 1];
+      lastWaterDate = lastRecord.date;
+      sourceRecordId = lastRecord.id;
+    } else if (hasTemplate) {
+      avgInterval = plantInfo.waterIntervalDays || 3;
+      avgWater = plantInfo.waterAmount || 50;
+      lastWaterDate = today;
+      lastRecord = null;
+      sourceRecordId = null;
+    } else {
+      return;
     }
 
-    const avgInterval = intervals.length > 0
-      ? Math.round(intervals.reduce((a, b) => a + b, 0) / intervals.length)
-      : 3;
+    if (plantInfo && plantInfo.waterIntervalDays !== null) {
+      avgInterval = plantInfo.waterIntervalDays;
+    }
+    if (plantInfo && plantInfo.waterAmount !== null) {
+      avgWater = plantInfo.waterAmount;
+    }
 
-    const lastRecord = plantRecords[plantRecords.length - 1];
-    const lastWaterDate = lastRecord.date;
-    const avgWater = Math.round(plantRecords.reduce((a, b) => a + b.water, 0) / plantRecords.length);
     const nextWaterDate = formatDate(new Date(parseDate(lastWaterDate).getTime() + avgInterval * 24 * 60 * 60 * 1000));
 
     result.push({
@@ -2925,7 +3035,15 @@ function getPlantCareInfo() {
       avgInterval,
       avgWater,
       nextWaterDate,
-      sourceRecordId: lastRecord.id
+      sourceRecordId,
+      fromTemplate: hasTemplate,
+      template: hasTemplate ? {
+        waterIntervalDays: plantInfo.waterIntervalDays,
+        waterAmount: plantInfo.waterAmount,
+        lightMin: plantInfo.lightMin,
+        lightMax: plantInfo.lightMax,
+        defaultNotes: plantInfo.defaultNotes
+      } : null
     });
   });
 
@@ -2956,7 +3074,9 @@ function generateCareSchedule() {
           water: info.avgWater,
           status,
           completed: careCompleted[careId] || false,
-          sourceRecordId: info.sourceRecordId
+          sourceRecordId: info.sourceRecordId,
+          fromTemplate: info.fromTemplate,
+          template: info.template
         });
       }
       currentDate = formatDate(new Date(parseDate(currentDate).getTime() + info.avgInterval * 24 * 60 * 60 * 1000));
@@ -2973,7 +3093,9 @@ function generateCareSchedule() {
           water: info.avgWater,
           status: 'overdue',
           completed: false,
-          sourceRecordId: info.sourceRecordId
+          sourceRecordId: info.sourceRecordId,
+          fromTemplate: info.fromTemplate,
+          template: info.template
         });
       }
     }
@@ -3501,6 +3623,31 @@ function renderArchive() {
       `;
     }
 
+    let templateSection = '';
+    const hasTemplate = plant.waterIntervalDays !== null || plant.waterAmount !== null || plant.lightMin !== null || plant.lightMax !== null;
+    if (hasTemplate) {
+      const templateItems = [];
+      if (plant.waterIntervalDays !== null) {
+        templateItems.push(`<span class="templateTag template-water">💧 每${plant.waterIntervalDays}天浇水</span>`);
+      }
+      if (plant.waterAmount !== null) {
+        templateItems.push(`<span class="templateTag template-amount">🚿 ${plant.waterAmount}ml/次</span>`);
+      }
+      if (plant.lightMin !== null && plant.lightMax !== null) {
+        templateItems.push(`<span class="templateTag template-light">☀️ ${plant.lightMin}-${plant.lightMax}h光照</span>`);
+      } else if (plant.lightMin !== null) {
+        templateItems.push(`<span class="templateTag template-light">☀️ ≥${plant.lightMin}h光照</span>`);
+      } else if (plant.lightMax !== null) {
+        templateItems.push(`<span class="templateTag template-light">☀️ ≤${plant.lightMax}h光照</span>`);
+      }
+      templateSection = `
+        <div class="plantTemplateSection">
+          <div class="templateLabel">养护模板</div>
+          <div class="templateTags">${templateItems.join('')}</div>
+        </div>
+      `;
+    }
+
     return `
       <div class="archiveCard ${plant.autoImported ? 'auto-imported' : ''}">
         <div class="archiveCardHead">
@@ -3514,9 +3661,10 @@ function renderArchive() {
         <div class="archiveCardBody">
           ${plant.acquisitionDate ? `<div class="archiveInfoItem"><span class="archiveInfoLabel">入手日期</span><span>${plant.acquisitionDate}</span></div>` : ''}
           ${plant.location ? `<div class="archiveInfoItem"><span class="archiveInfoLabel">摆放位置</span><span>${plant.location}</span></div>` : ''}
+          ${templateSection}
           ${plant.defaultNotes ? `<div class="archiveInfoItem"><span class="archiveInfoLabel">养护备注</span><span>${plant.defaultNotes}</span></div>` : ''}
           ${goalSection}
-          ${plant.autoImported && !plant.acquisitionDate && !plant.location && !plant.defaultNotes ? '<div class="archiveHint">点击「完善信息」补充植物详情</div>' : ''}
+          ${plant.autoImported && !plant.acquisitionDate && !plant.location && !hasTemplate && !plant.defaultNotes ? '<div class="archiveHint">点击「完善信息」补充植物详情和养护模板</div>' : ''}
         </div>
         <div class="archiveCardActions">
           <button class="archiveEditBtn" data-archive-edit="${plant.id}">${plant.autoImported ? '完善信息' : '编辑'}</button>
@@ -3537,6 +3685,10 @@ function renderArchive() {
         archiveForm.elements.acquisitionDate.value = plant.acquisitionDate || '';
         archiveForm.elements.location.value = plant.location || '';
         archiveForm.elements.defaultNotes.value = plant.defaultNotes || '';
+        archiveForm.elements.waterIntervalDays.value = plant.waterIntervalDays !== null && plant.waterIntervalDays !== undefined ? plant.waterIntervalDays : '';
+        archiveForm.elements.waterAmount.value = plant.waterAmount !== null && plant.waterAmount !== undefined ? plant.waterAmount : '';
+        archiveForm.elements.lightMin.value = plant.lightMin !== null && plant.lightMin !== undefined ? plant.lightMin : '';
+        archiveForm.elements.lightMax.value = plant.lightMax !== null && plant.lightMax !== undefined ? plant.lightMax : '';
         archiveCancelBtn.style.display = 'inline-block';
         archiveFormTitle.textContent = '编辑植物档案';
         archiveForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -3573,7 +3725,11 @@ function renderArchive() {
 
 function renderCareCalendar() {
   const schedule = generateCareSchedule();
-  const plants = [...new Set(records.map((r) => r.plant))].sort();
+  const recordPlants = records.map((r) => r.plant);
+  const templatePlants = plantArchive
+    .filter((p) => p.waterIntervalDays !== null || p.waterAmount !== null)
+    .map((p) => p.nickname);
+  const plants = [...new Set([...recordPlants, ...templatePlants])].sort();
 
   carePlantFilter.innerHTML = `<option value="">全部植物</option>${plants.map((p) => `<option>${p}</option>`).join('')}`;
   carePlantFilter.value = plants.includes(careFilterPlant) ? careFilterPlant : '';
@@ -3617,15 +3773,34 @@ function renderCareCalendar() {
           ${items.map((item) => {
             const status = item.completed ? 'completed' : item.status;
             const statusInfo = getStatusLabel(status);
+            const templateBadge = item.fromTemplate ? '<span class="template-badge" title="按养护模板生成">📋</span>' : '';
+            let detailHtml = `<span class="care-water">💧 ${item.water}ml</span>`;
+            if (item.fromTemplate && item.template) {
+              const lightTags = [];
+              if (item.template.lightMin !== null && item.template.lightMax !== null) {
+                lightTags.push(`<span class="care-light">☀️ ${item.template.lightMin}-${item.template.lightMax}h</span>`);
+              } else if (item.template.lightMin !== null) {
+                lightTags.push(`<span class="care-light">☀️ ≥${item.template.lightMin}h</span>`);
+              } else if (item.template.lightMax !== null) {
+                lightTags.push(`<span class="care-light">☀️ ≤${item.template.lightMax}h</span>`);
+              }
+              if (lightTags.length > 0) {
+                detailHtml += ' ' + lightTags.join('');
+              }
+            }
+            const notesHtml = (item.fromTemplate && item.template && item.template.defaultNotes)
+              ? `<div class="care-item-notes" title="养护备注">📝 ${item.template.defaultNotes}</div>`
+              : '';
             return `
               <div class="care-item ${item.completed ? 'item-completed' : ''}">
                 <div class="care-item-main">
-                  <span class="care-plant">${item.plant}</span>
+                  <span class="care-plant">${item.plant} ${templateBadge}</span>
                   <span class="status-tag ${statusInfo.class}">${statusInfo.text}</span>
                 </div>
                 <div class="care-item-detail">
-                  <span class="care-water">💧 ${item.water}ml</span>
+                  ${detailHtml}
                 </div>
+                ${notesHtml}
                 <div class="care-item-actions">
                   ${item.completed
                     ? `<button class="care-undo" data-undo="${item.id}">撤销</button>`
