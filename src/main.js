@@ -2217,6 +2217,58 @@ function alignExperimentData(experiment, alignMode) {
   return { alignedData, groupsData, sortedKeys };
 }
 
+function getConclusionComparisonData(groupsData, alignMode) {
+  const sufficientGroups = groupsData.filter(gd => gd.records.length >= 2);
+
+  if (sufficientGroups.length < 2) {
+    return groupsData.map(gd => ({
+      ...gd,
+      comparisonRecords: alignMode === 'relative' ? gd.alignedPoints : gd.records,
+      comparisonHasTimeRangeIssue: false
+    }));
+  }
+
+  if (alignMode === 'date') {
+    const overlapStart = sufficientGroups.reduce((max, gd) => {
+      const start = gd.records[0].date;
+      return start > max ? start : max;
+    }, '');
+    const overlapEnd = sufficientGroups.reduce((min, gd) => {
+      const end = gd.records[gd.records.length - 1].date;
+      return end < min ? end : min;
+    }, '9999-99-99');
+    const hasOverlap = overlapStart <= overlapEnd;
+
+    return groupsData.map(gd => {
+      const canCompare = gd.records.length >= 2;
+      return {
+        ...gd,
+        comparisonRecords: hasOverlap && canCompare
+          ? gd.records.filter(record => record.date >= overlapStart && record.date <= overlapEnd)
+          : [],
+        comparisonHasTimeRangeIssue: canCompare && !hasOverlap,
+        comparisonRange: hasOverlap ? { start: overlapStart, end: overlapEnd } : null
+      };
+    });
+  }
+
+  const commonEnd = Math.min(...sufficientGroups.map(gd =>
+    Math.max(...gd.alignedPoints.map(point => point.dayOffset || 0))
+  ));
+
+  return groupsData.map(gd => {
+    const canCompare = gd.records.length >= 2;
+    return {
+      ...gd,
+      comparisonRecords: canCompare
+        ? gd.alignedPoints.filter(point => (point.dayOffset || 0) <= commonEnd)
+        : gd.alignedPoints,
+      comparisonHasTimeRangeIssue: canCompare && commonEnd <= 0,
+      comparisonRange: { start: 0, end: commonEnd }
+    };
+  });
+}
+
 function calculateGrowthMetrics(group, records) {
   if (records.length < 2) {
     return {
@@ -2229,6 +2281,7 @@ function calculateGrowthMetrics(group, records) {
       totalLight: 0,
       avgLight: 0,
       recordCount: records.length,
+      recordDensity: 0,
       durationDays: 0
     };
   }
@@ -2263,7 +2316,7 @@ function calculateExperimentConclusion(exp, groupsData, groupMetrics, alignMode)
 
   groupsData.forEach((gd, idx) => {
     const m = groupMetrics[idx];
-    const calcRecords = alignMode === 'relative' ? gd.alignedPoints : gd.records;
+    const calcRecords = gd.comparisonRecords || (alignMode === 'relative' ? gd.alignedPoints : gd.records);
     const isInsufficient = calcRecords.length < 2;
 
     validGroups.push({
@@ -2275,7 +2328,7 @@ function calculateExperimentConclusion(exp, groupsData, groupMetrics, alignMode)
       alignedRecords: gd.alignedPoints,
       metrics: m,
       isInsufficient,
-      hasTimeRangeIssue: false,
+      hasTimeRangeIssue: Boolean(gd.comparisonHasTimeRangeIssue),
       dateRangeInfo: null
     });
   });
@@ -2821,13 +2874,13 @@ function renderExperimentView() {
   experimentAlignModeSelect.value = experimentAlignMode;
 
   const { alignedData, groupsData } = alignExperimentData(exp, experimentAlignMode);
+  const comparisonGroupsData = getConclusionComparisonData(groupsData, experimentAlignMode);
 
-  const groupMetrics = groupsData.map(gd => {
-    const calcRecords = experimentAlignMode === 'relative' ? gd.alignedPoints : gd.records;
-    return calculateGrowthMetrics(gd.group, calcRecords);
-  });
+  const groupMetrics = comparisonGroupsData.map(gd =>
+    calculateGrowthMetrics(gd.group, gd.comparisonRecords)
+  );
 
-  const conclusion = calculateExperimentConclusion(exp, groupsData, groupMetrics, experimentAlignMode);
+  const conclusion = calculateExperimentConclusion(exp, comparisonGroupsData, groupMetrics, experimentAlignMode);
 
   experimentViewInfo.innerHTML = `
     <div class="experimentViewHeader">
