@@ -475,6 +475,7 @@ let editingId = null;
 let careExpanded = true;
 let careFilterPlant = '';
 let careFilterStatus = 'all';
+let pendingCareTodoId = null;
 let timelinePlant = '';
 let comparePhoto1 = null;
 let comparePhoto2 = null;
@@ -3194,6 +3195,7 @@ form.addEventListener('submit', async (event) => {
     id: newRecordId
   };
 
+  const isNewRecord = !editingId;
   records = editingId ? records.map((record) => (record.id === editingId ? item : record)) : [item, ...records];
   editingId = null;
   pendingPhotoUpload = null;
@@ -3214,6 +3216,13 @@ form.addEventListener('submit', async (event) => {
   syncPlantsFromRecords();
   checkAndUpdateGoalAchievement(data.plant);
   clearDiagnosisCache();
+
+  if (pendingCareTodoId && isNewRecord) {
+    careCompleted[pendingCareTodoId] = true;
+    saveCare();
+    pendingCareTodoId = null;
+  }
+
   render();
 });
 
@@ -4543,7 +4552,10 @@ function renderCareCalendar() {
                 <div class="care-item-actions">
                   ${item.completed
                     ? `<button class="care-undo" data-undo="${item.id}">撤销</button>`
-                    : `<button class="care-done" data-done="${item.id}">标记完成</button>`
+                    : `
+                      <button class="care-gen-record" data-gen-record="${item.id}">📝 生成记录</button>
+                      <button class="care-done" data-done="${item.id}">标记完成</button>
+                    `
                   }
                 </div>
               </div>
@@ -4569,6 +4581,32 @@ function renderCareCalendar() {
       delete careCompleted[id];
       saveCare();
       renderCareCalendar();
+    });
+  });
+
+  document.querySelectorAll('[data-gen-record]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.genRecord;
+      const careItem = schedule.find((s) => s.id === id);
+      if (!careItem) return;
+
+      pendingCareTodoId = id;
+
+      updatePlantSelect();
+      plantSelect.value = careItem.plant;
+      form.elements.date.value = careItem.date;
+      form.elements.water.value = careItem.water;
+
+      showPlantNotesHint(careItem.plant);
+
+      editingId = null;
+      useLastRecordBtn.style.display = 'none';
+
+      form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      setTimeout(() => {
+        form.elements.height.focus();
+      }, 300);
     });
   });
 }
@@ -4801,6 +4839,7 @@ function render() {
   document.querySelectorAll('[data-edit]').forEach((button) => button.addEventListener('click', async () => {
     const record = records.find((item) => item.id === button.dataset.edit);
     editingId = record.id;
+    pendingCareTodoId = null;
     Object.entries(record).forEach(([name, value]) => {
       if (form.elements[name]) {
         form.elements[name].value = value;

@@ -363,6 +363,15 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
   font-weight: 600;
 }
 
+.care-gen-record {
+  background: #2b6cb0;
+  color: white;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-weight: 600;
+}
+
 .care-undo {
   background: #e5e7eb;
   color: #4b5563;
