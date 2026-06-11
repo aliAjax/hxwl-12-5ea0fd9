@@ -475,7 +475,7 @@ let editingId = null;
 let careExpanded = true;
 let careFilterPlant = '';
 let careFilterStatus = 'all';
-let pendingCareTodoId = null;
+let pendingCareTodo = null;
 let timelinePlant = '';
 let comparePhoto1 = null;
 let comparePhoto2 = null;
@@ -3217,10 +3217,9 @@ form.addEventListener('submit', async (event) => {
   checkAndUpdateGoalAchievement(data.plant);
   clearDiagnosisCache();
 
-  if (pendingCareTodoId && isNewRecord) {
-    careCompleted[pendingCareTodoId] = true;
-    saveCare();
-    pendingCareTodoId = null;
+  if (pendingCareTodo && isNewRecord) {
+    markCareCompleted(pendingCareTodo);
+    pendingCareTodo = null;
   }
 
   render();
@@ -3279,6 +3278,36 @@ function save() {
 
 function saveCare() {
   localStorage.setItem(careKey, JSON.stringify(careCompleted));
+}
+
+function getCareCompletedEntry(id) {
+  const entry = careCompleted[id];
+  if (!entry) return null;
+  return entry === true ? { id, completed: true } : entry;
+}
+
+function isCareCompleted(id) {
+  return Boolean(getCareCompletedEntry(id));
+}
+
+function createCareCompletionSnapshot(item) {
+  return {
+    completed: true,
+    id: item.id,
+    plant: item.plant,
+    date: item.date,
+    water: item.water,
+    status: item.status,
+    sourceRecordId: item.sourceRecordId || null,
+    fromTemplate: Boolean(item.fromTemplate),
+    template: item.template || null,
+    completedAt: formatDate(new Date())
+  };
+}
+
+function markCareCompleted(item) {
+  careCompleted[item.id] = createCareCompletionSnapshot(item);
+  saveCare();
 }
 
 function parseDate(dateStr) {
@@ -3396,7 +3425,7 @@ function generateCareSchedule() {
           date: currentDate,
           water: info.avgWater,
           status,
-          completed: careCompleted[careId] || false,
+          completed: isCareCompleted(careId),
           sourceRecordId: info.sourceRecordId,
           fromTemplate: info.fromTemplate,
           template: info.template
@@ -3406,7 +3435,7 @@ function generateCareSchedule() {
       iterCount++;
     }
 
-    if (info.nextWaterDate < today && !careCompleted[`${info.plant}-${info.nextWaterDate}`]) {
+    if (info.nextWaterDate < today && !isCareCompleted(`${info.plant}-${info.nextWaterDate}`)) {
       const exists = schedule.some((s) => s.plant === info.plant && s.date === info.nextWaterDate);
       if (!exists) {
         schedule.push({
@@ -3422,6 +3451,22 @@ function generateCareSchedule() {
         });
       }
     }
+  });
+
+  const scheduledIds = new Set(schedule.map((item) => item.id));
+  Object.entries(careCompleted).forEach(([id, entry]) => {
+    if (!entry || entry === true || scheduledIds.has(id)) return;
+    schedule.push({
+      id,
+      plant: entry.plant,
+      date: entry.date,
+      water: entry.water,
+      status: entry.status || getCareStatus(entry.date),
+      completed: true,
+      sourceRecordId: entry.sourceRecordId || null,
+      fromTemplate: Boolean(entry.fromTemplate),
+      template: entry.template || null
+    });
   });
 
   return schedule.sort((a, b) => a.date.localeCompare(b.date));
@@ -4569,8 +4614,8 @@ function renderCareCalendar() {
   document.querySelectorAll('[data-done]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.done;
-      careCompleted[id] = true;
-      saveCare();
+      const careItem = schedule.find((s) => s.id === id);
+      if (careItem) markCareCompleted(careItem);
       renderCareCalendar();
     });
   });
@@ -4590,7 +4635,7 @@ function renderCareCalendar() {
       const careItem = schedule.find((s) => s.id === id);
       if (!careItem) return;
 
-      pendingCareTodoId = id;
+      pendingCareTodo = careItem;
 
       updatePlantSelect();
       plantSelect.value = careItem.plant;
@@ -4839,7 +4884,7 @@ function render() {
   document.querySelectorAll('[data-edit]').forEach((button) => button.addEventListener('click', async () => {
     const record = records.find((item) => item.id === button.dataset.edit);
     editingId = record.id;
-    pendingCareTodoId = null;
+    pendingCareTodo = null;
     Object.entries(record).forEach(([name, value]) => {
       if (form.elements[name]) {
         form.elements[name].value = value;
