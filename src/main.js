@@ -748,6 +748,36 @@ document.querySelector('#app').innerHTML = `
 
     <section class="panel">
       <div class="panelHead"><h2>记录列表</h2><input id="search" placeholder="搜索植物或状态" /></div>
+      <div class="recordFilters">
+        <div class="filterGroup">
+          <label>开始日期</label>
+          <input type="date" id="startDateFilter" />
+        </div>
+        <div class="filterGroup">
+          <label>结束日期</label>
+          <input type="date" id="endDateFilter" />
+        </div>
+        <div class="filterGroup">
+          <label>排序方式</label>
+          <select id="sortBy">
+            <option value="date">日期</option>
+            <option value="height">高度</option>
+            <option value="leaves">叶片数</option>
+            <option value="water">浇水量</option>
+            <option value="light">光照时长</option>
+          </select>
+        </div>
+        <div class="filterGroup">
+          <label>排序顺序</label>
+          <select id="sortOrder">
+            <option value="desc">降序</option>
+            <option value="asc">升序</option>
+          </select>
+        </div>
+        <div class="filterGroup filterReset">
+          <button type="button" id="resetFilters">重置筛选</button>
+        </div>
+      </div>
       <div class="records" id="records"></div>
     </section>
   </main>
@@ -872,6 +902,11 @@ document.querySelector('#app').innerHTML = `
 const form = document.querySelector('#form');
 const filter = document.querySelector('#plantFilter');
 const search = document.querySelector('#search');
+const startDateFilter = document.querySelector('#startDateFilter');
+const endDateFilter = document.querySelector('#endDateFilter');
+const sortBy = document.querySelector('#sortBy');
+const sortOrder = document.querySelector('#sortOrder');
+const resetFilters = document.querySelector('#resetFilters');
 const carePlantFilter = document.querySelector('#carePlantFilter');
 const careStatusFilter = document.querySelector('#careStatusFilter');
 const careToggle = document.querySelector('#careToggle');
@@ -3184,6 +3219,19 @@ form.addEventListener('submit', async (event) => {
 
 filter.addEventListener('change', render);
 search.addEventListener('input', render);
+startDateFilter.addEventListener('change', render);
+endDateFilter.addEventListener('change', render);
+sortBy.addEventListener('change', render);
+sortOrder.addEventListener('change', render);
+resetFilters.addEventListener('click', () => {
+  filter.value = '';
+  search.value = '';
+  startDateFilter.value = '';
+  endDateFilter.value = '';
+  sortBy.value = 'date';
+  sortOrder.value = 'desc';
+  render();
+});
 document.querySelector('#sample').addEventListener('click', () => {
   records = seed;
   save();
@@ -4607,10 +4655,33 @@ function render() {
   const plants = [...new Set(records.map((record) => record.plant))].sort();
   filter.innerHTML = `<option value="">全部植物</option>${plants.map((plant) => `<option>${plant}</option>`).join('')}`;
   filter.value = selectedPlant && plants.includes(selectedPlant) ? selectedPlant : '';
-  const scoped = records
+
+  const startDate = startDateFilter.value;
+  const endDate = endDateFilter.value;
+  const sortField = sortBy.value;
+  const sortDir = sortOrder.value;
+
+  const filteredRecords = records
     .filter((record) => !filter.value || record.plant === filter.value)
     .filter((record) => [record.plant, record.state].join(' ').includes(search.value.trim()))
-    .sort((a, b) => a.date.localeCompare(b.date));
+    .filter((record) => !startDate || record.date >= startDate)
+    .filter((record) => !endDate || record.date <= endDate);
+
+  const chartData = [...filteredRecords].sort((a, b) => a.date.localeCompare(b.date));
+
+  const sortedRecords = [...filteredRecords].sort((a, b) => {
+    let comparison = 0;
+    if (sortField === 'date') {
+      comparison = a.date.localeCompare(b.date);
+    } else if (sortField === 'plant') {
+      comparison = a.plant.localeCompare(b.plant);
+    } else {
+      comparison = a[sortField] - b[sortField];
+    }
+    return sortDir === 'asc' ? comparison : -comparison;
+  });
+
+  const filteredPlants = [...new Set(filteredRecords.map((record) => record.plant))].sort();
   const goalsSummary = getAllGoalsSummary();
   const goalItems = [];
   if (goalsSummary.activeGoals > 0) {
@@ -4625,9 +4696,9 @@ function render() {
   }
 
   const summaryItems = [
-    ['植物数', plants.length],
-    ['记录数', records.length],
-    ['最高高度', `${Math.max(...records.map((record) => record.height), 0).toFixed(1)}cm`],
+    ['植物数', filteredPlants.length],
+    ['记录数', filteredRecords.length],
+    ['最高高度', `${Math.max(...filteredRecords.map((record) => record.height), 0).toFixed(1)}cm`],
     ...goalItems
   ];
 
@@ -4667,10 +4738,10 @@ function render() {
     }
   }
 
-  drawLine('#heightChart', scoped.map((record) => ({ label: record.date.slice(5), value: record.height })), 'cm', '#2f855a', heightGoal);
-  drawMultiBars('#careChart', scoped.map((record) => ({ label: record.date.slice(5), water: record.water, light: record.light * 20 })));
-  drawLine('#leafChart', scoped.map((record) => ({ label: record.date.slice(5), value: record.leaves })), '片', '#7c3aed', leafGoal);
-  document.querySelector('#records').innerHTML = scoped.slice().reverse().map((record) => {
+  drawLine('#heightChart', chartData.map((record) => ({ label: record.date.slice(5), value: record.height })), 'cm', '#2f855a', heightGoal);
+  drawMultiBars('#careChart', chartData.map((record) => ({ label: record.date.slice(5), water: record.water, light: record.light * 20 })));
+  drawLine('#leafChart', chartData.map((record) => ({ label: record.date.slice(5), value: record.leaves })), '片', '#7c3aed', leafGoal);
+  document.querySelector('#records').innerHTML = sortedRecords.map((record) => {
     const hasPhoto = record.photo && record.photo.trim() !== '';
     const isLocal = PhotoManager.isLocalImage(record.photo);
     return `
