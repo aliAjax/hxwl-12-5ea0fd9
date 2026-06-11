@@ -2252,8 +2252,154 @@ function calculateGrowthMetrics(group, records) {
     totalLight: Number(totalLight.toFixed(1)),
     avgLight: Number((totalLight / records.length).toFixed(1)),
     recordCount: records.length,
+    recordDensity: records.length > 1 && durationDays > 0 ? Number((records.length / durationDays).toFixed(3)) : 0,
     durationDays
   };
+}
+
+function calculateExperimentConclusion(exp, groupsData, groupMetrics) {
+  const validGroups = [];
+  const warnings = [];
+
+  groupsData.forEach((gd, idx) => {
+    const m = groupMetrics[idx];
+    const isInsufficient = gd.records.length < 2;
+
+    validGroups.push({
+      index: idx,
+      name: gd.group.name,
+      color: gd.group.color,
+      records: gd.records,
+      metrics: m,
+      isInsufficient,
+      hasTimeRangeIssue: false,
+      dateRangeInfo: null
+    });
+  });
+
+  if (exp.type === 'plant') {
+    const sufficientRanges = validGroups
+      .filter(g => !g.isInsufficient)
+      .map(g => ({
+        name: g.name,
+        start: g.records[0].date,
+        end: g.records[g.records.length - 1].date,
+        days: g.metrics.durationDays
+      }));
+
+    sufficientRanges.forEach(r => {
+      const g = validGroups.find(vg => vg.name === r.name);
+      if (g) g.dateRangeInfo = { start: r.start, end: r.end, days: r.days };
+    });
+
+    if (sufficientRanges.length >= 2) {
+      const maxDays = Math.max(...sufficientRanges.map(r => r.days));
+      const minDays = Math.min(...sufficientRanges.map(r => r.days));
+      const overlapStart = sufficientRanges.reduce((max, r) => r.start > max ? r.start : max, '');
+      const overlapEnd = sufficientRanges.reduce((min, r) => r.end < min ? r.end : min, '9999-99-99');
+
+      if (overlapStart > overlapEnd) {
+        sufficientRanges.forEach(r => {
+          const g = validGroups.find(vg => vg.name === r.name);
+          if (g) g.hasTimeRangeIssue = true;
+        });
+        warnings.push('各实验组的时间范围无重叠，对比结论可能不可靠');
+      } else if (maxDays > 0 && (maxDays - minDays) / maxDays > 0.5) {
+        sufficientRanges.forEach(r => {
+          if (r.days < maxDays * 0.5) {
+            const g = validGroups.find(vg => vg.name === r.name);
+            if (g) g.hasTimeRangeIssue = true;
+          }
+        });
+        warnings.push('各实验组时间跨度差异较大（超过50%），对比可能存在偏差');
+      }
+    }
+  }
+
+  if (exp.type === 'dateRange') {
+    const configuredRanges = exp.groups.map(g => ({
+      name: g.name,
+      configuredStart: g.dateStart,
+      configuredEnd: g.dateEnd,
+      actualStart: null,
+      actualEnd: null,
+      actualDays: 0,
+      coverage: 0
+    }));
+
+    validGroups.forEach((g, i) => {
+      if (!g.isInsufficient) {
+        configuredRanges[i].actualStart = g.records[0].date;
+        configuredRanges[i].actualEnd = g.records[g.records.length - 1].date;
+        configuredRanges[i].actualDays = g.metrics.durationDays;
+        const configDays = daysBetween(configuredRanges[i].configuredStart, configuredRanges[i].configuredEnd);
+        configuredRanges[i].coverage = configDays > 0 ? Math.min(1, g.metrics.durationDays / configDays) : 0;
+        g.dateRangeInfo = {
+          configuredStart: configuredRanges[i].configuredStart,
+          configuredEnd: configuredRanges[i].configuredEnd,
+          actualStart: configuredRanges[i].actualStart,
+          actualEnd: configuredRanges[i].actualEnd,
+          coverage: configuredRanges[i].coverage
+        };
+      }
+    });
+
+    const starts = configuredRanges.map(r => r.configuredStart);
+    const ends = configuredRanges.map(r => r.configuredEnd);
+    const allSameConfig = starts.every(s => s === starts[0]) && ends.every(e => e === ends[0]);
+
+    if (!allSameConfig) {
+      configuredRanges.forEach((_, i) => {
+        if (!validGroups[i].isInsufficient) {
+          validGroups[i].hasTimeRangeIssue = true;
+        }
+      });
+      warnings.push('各实验组时间段设置不一致，对比结果需谨慎参考');
+    }
+
+    const lowCoverageGroups = configuredRanges.filter(r => !validGroups[configuredRanges.indexOf(r)].isInsufficient && r.coverage < 0.8);
+    if (lowCoverageGroups.length > 0) {
+      lowCoverageGroups.forEach(r => {
+        const idx = configuredRanges.indexOf(r);
+        validGroups[idx].hasTimeRangeIssue = true;
+      });
+      warnings.push(`有${lowCoverageGroups.length}组实际记录未充分覆盖配置的时间段，数据覆盖度不足80%`);
+    }
+  }
+
+  validGroups.forEach(g => {
+    if (g.isInsufficient) {
+      warnings.push(`「${g.name}」记录不足2条，数据不足以计算可靠的增长率`);
+    } else if (g.hasTimeRangeIssue) {
+      warnings.push(`「${g.name}」时间范围与其他组不一致或覆盖度不足，可能影响对比公平性`);
+    }
+  });
+
+  const sufficientGroups = validGroups.filter(g => !g.isInsufficient && !g.hasTimeRangeIssue);
+
+  let comparisons = {};
+  if (sufficientGroups.length >= 2) {
+    const bestHeightRate = sufficientGroups.reduce((best, g) =>
+      g.metrics.heightGrowthRate > best.metrics.heightGrowthRate ? g : best);
+    const bestLeavesRate = sufficientGroups.reduce((best, g) =>
+      g.metrics.leavesGrowthRate > best.metrics.leavesGrowthRate ? g : best);
+    const bestWater = sufficientGroups.reduce((best, g) =>
+      g.metrics.avgWater > best.metrics.avgWater ? g : best);
+    const bestLight = sufficientGroups.reduce((best, g) =>
+      g.metrics.avgLight > best.metrics.avgLight ? g : best);
+    const bestDensity = sufficientGroups.reduce((best, g) =>
+      g.metrics.recordDensity > best.metrics.recordDensity ? g : best);
+
+    comparisons = {
+      bestHeightRate: { name: bestHeightRate.name, color: bestHeightRate.color, value: bestHeightRate.metrics.heightGrowthRate },
+      bestLeavesRate: { name: bestLeavesRate.name, color: bestLeavesRate.color, value: bestLeavesRate.metrics.leavesGrowthRate },
+      mostWater: { name: bestWater.name, color: bestWater.color, value: bestWater.metrics.avgWater },
+      mostLight: { name: bestLight.name, color: bestLight.color, value: bestLight.metrics.avgLight },
+      bestDensity: { name: bestDensity.name, color: bestDensity.color, value: bestDensity.metrics.recordDensity }
+    };
+  }
+
+  return { validGroups, warnings, comparisons, hasEnoughData: sufficientGroups.length >= 2 };
 }
 
 function drawMultiLineCompare(selector, alignedData, groupsData, field, unit, yAxisLabel) {
@@ -2674,6 +2820,8 @@ function renderExperimentView() {
 
   const groupMetrics = groupsData.map(gd => calculateGrowthMetrics(gd.group, gd.records));
 
+  const conclusion = calculateExperimentConclusion(exp, groupsData, groupMetrics);
+
   experimentViewInfo.innerHTML = `
     <div class="experimentViewHeader">
       <div>
@@ -2683,6 +2831,7 @@ function renderExperimentView() {
           <span class="experimentTypeTag">${exp.type === 'plant' ? '植物对比' : '时段对比'}</span>
           <span>共 ${exp.groups.length} 组</span>
           <span>${alignedData.length} 个数据点</span>
+          <span>对齐：${experimentAlignMode === 'relative' ? '相对天数' : '实际日期'}</span>
         </div>
       </div>
     </div>
@@ -2690,37 +2839,100 @@ function renderExperimentView() {
     <div class="experimentMetricsGrid">
       ${groupsData.map((gd, idx) => {
         const m = groupMetrics[idx];
+        const g = conclusion.validGroups[idx];
+        const statusClass = g.isInsufficient ? ' metricCardInsufficient' : (g.hasTimeRangeIssue ? ' metricCardTimeIssue' : '');
+        const statusTag = g.isInsufficient
+          ? '<span class="metricStatusTag metricStatusInsufficient">数据不足</span>'
+          : (g.hasTimeRangeIssue ? '<span class="metricStatusTag metricStatusTimeIssue">时间不一致</span>' : '');
         return `
-          <div class="experimentMetricCard" style="border-left: 4px solid ${gd.group.color}">
+          <div class="experimentMetricCard${statusClass}" style="border-left: 4px solid ${gd.group.color}">
             <div class="experimentMetricHead">
               <span class="experimentMetricDot" style="background: ${gd.group.color}"></span>
               <strong>${gd.group.name}</strong>
+              ${statusTag}
             </div>
             <div class="experimentMetricStats">
               <div class="experimentMetricItem">
-                <span class="metricLabel">高度增长</span>
-                <span class="metricValue">+${m.heightGrowth}cm</span>
-                <span class="metricRate">${m.heightGrowthRate}cm/天</span>
+                <span class="metricLabel">高度增长率</span>
+                <span class="metricValue">${m.heightGrowthRate}<span class="metricUnit">cm/天</span></span>
+                <span class="metricRate">总增长 +${m.heightGrowth}cm</span>
               </div>
               <div class="experimentMetricItem">
-                <span class="metricLabel">叶片增长</span>
-                <span class="metricValue">+${m.leavesGrowth}片</span>
-                <span class="metricRate">${m.leavesGrowthRate}片/天</span>
+                <span class="metricLabel">叶片增长率</span>
+                <span class="metricValue">${m.leavesGrowthRate}<span class="metricUnit">片/天</span></span>
+                <span class="metricRate">总增长 +${m.leavesGrowth}片</span>
               </div>
               <div class="experimentMetricItem">
-                <span class="metricLabel">累计浇水</span>
-                <span class="metricValue">${m.totalWater}ml</span>
-                <span class="metricRate">${m.avgWater}ml/次</span>
+                <span class="metricLabel">平均浇水量</span>
+                <span class="metricValue">${m.avgWater}<span class="metricUnit">ml/次</span></span>
+                <span class="metricRate">累计 ${m.totalWater}ml</span>
               </div>
               <div class="experimentMetricItem">
-                <span class="metricLabel">累计光照</span>
-                <span class="metricValue">${m.totalLight}h</span>
-                <span class="metricRate">${m.avgLight}h/天</span>
+                <span class="metricLabel">平均光照</span>
+                <span class="metricValue">${m.avgLight}<span class="metricUnit">h/天</span></span>
+                <span class="metricRate">累计 ${m.totalLight}h</span>
+              </div>
+              <div class="experimentMetricItem">
+                <span class="metricLabel">记录密度</span>
+                <span class="metricValue">${m.recordDensity}<span class="metricUnit">条/天</span></span>
+                <span class="metricRate">共 ${m.recordCount} 条 / ${m.durationDays} 天</span>
               </div>
             </div>
           </div>
         `;
       }).join('')}
+    </div>
+
+    <div class="experimentConclusionPanel">
+      <div class="conclusionHeader">
+        <h3>📋 实验结论</h3>
+        <span class="conclusionAlignTag">${experimentAlignMode === 'relative' ? '相对天数模式' : '实际日期模式'}</span>
+      </div>
+      ${conclusion.hasEnoughData ? `
+        <div class="conclusionSummary">
+          <div class="conclusionSummaryItem">
+            <span class="conclusionIcon">📏</span>
+            <span class="conclusionLabel">高度增长最快</span>
+            <span class="conclusionValue" style="color: ${conclusion.comparisons.bestHeightRate.color}">${conclusion.comparisons.bestHeightRate.name}</span>
+            <span class="conclusionDetail">${conclusion.comparisons.bestHeightRate.value} cm/天</span>
+          </div>
+          <div class="conclusionSummaryItem">
+            <span class="conclusionIcon">🍃</span>
+            <span class="conclusionLabel">叶片增长最快</span>
+            <span class="conclusionValue" style="color: ${conclusion.comparisons.bestLeavesRate.color}">${conclusion.comparisons.bestLeavesRate.name}</span>
+            <span class="conclusionDetail">${conclusion.comparisons.bestLeavesRate.value} 片/天</span>
+          </div>
+          <div class="conclusionSummaryItem">
+            <span class="conclusionIcon">💧</span>
+            <span class="conclusionLabel">平均浇水最多</span>
+            <span class="conclusionValue" style="color: ${conclusion.comparisons.mostWater.color}">${conclusion.comparisons.mostWater.name}</span>
+            <span class="conclusionDetail">${conclusion.comparisons.mostWater.value} ml/次</span>
+          </div>
+          <div class="conclusionSummaryItem">
+            <span class="conclusionIcon">☀️</span>
+            <span class="conclusionLabel">平均光照最多</span>
+            <span class="conclusionValue" style="color: ${conclusion.comparisons.mostLight.color}">${conclusion.comparisons.mostLight.name}</span>
+            <span class="conclusionDetail">${conclusion.comparisons.mostLight.value} h/天</span>
+          </div>
+          <div class="conclusionSummaryItem">
+            <span class="conclusionIcon">📊</span>
+            <span class="conclusionLabel">记录密度最高</span>
+            <span class="conclusionValue" style="color: ${conclusion.comparisons.bestDensity.color}">${conclusion.comparisons.bestDensity.name}</span>
+            <span class="conclusionDetail">${conclusion.comparisons.bestDensity.value} 条/天</span>
+          </div>
+        </div>
+      ` : `
+        <div class="conclusionInsufficient">
+          <span class="conclusionIcon">⚠️</span>
+          <span>有效实验组不足2组，无法生成对比结论。请确保至少有2组数据充足且时间范围一致的实验组。</span>
+        </div>
+      `}
+      ${conclusion.warnings.length > 0 ? `
+        <div class="conclusionWarnings">
+          <div class="conclusionWarningsHead">⚠️ 数据质量提示</div>
+          <ul>${conclusion.warnings.map(w => `<li>${w}</li>`).join('')}</ul>
+        </div>
+      ` : ''}
     </div>
 
     <div class="experimentDataNotice" id="experimentDataNotice"></div>
@@ -2729,21 +2941,19 @@ function renderExperimentView() {
   const noticeEl = document.querySelector('#experimentDataNotice');
   const issues = [];
   groupsData.forEach((gd, idx) => {
-    if (gd.records.length < 2) {
-      issues.push(`「${gd.group.name}」记录不足2条，增长率计算可能不准确`);
-    }
     const missingPoints = alignedData.length - gd.alignedPoints.length;
     if (missingPoints > 0) {
-      issues.push(`「${gd.group.name}」缺失 ${missingPoints} 个时间点的数据`);
+      const missingPct = alignedData.length > 0 ? Math.round(missingPoints / alignedData.length * 100) : 0;
+      issues.push(`「${gd.group.name}」缺失 ${missingPoints}/${alignedData.length}（${missingPct}%）个对齐时间点的数据，曲线对比可能不完整`);
     }
   });
 
   if (issues.length > 0) {
     noticeEl.innerHTML = `
       <div class="dataNotice">
-        <span class="dataNoticeIcon">⚠️</span>
+        <span class="dataNoticeIcon">📉</span>
         <div class="dataNoticeContent">
-          <strong>数据提示</strong>
+          <strong>图表对齐提示</strong>
           <ul>${issues.map(i => `<li>${i}</li>`).join('')}</ul>
         </div>
       </div>
