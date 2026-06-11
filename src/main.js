@@ -3611,6 +3611,17 @@ async function getAnnotationCount(photoUrl, recordId) {
   return count;
 }
 
+function updateAnnotationBadge(badge, count) {
+  const countEl = badge.querySelector('.annBadgeCount');
+  if (count > 0) {
+    badge.style.display = 'flex';
+    if (countEl) countEl.textContent = count;
+  } else {
+    badge.style.display = 'none';
+    if (countEl) countEl.textContent = '0';
+  }
+}
+
 async function loadTimelineAnnotationBadges() {
   const badges = document.querySelectorAll('[data-role="timeline-ann-badge"]');
   for (const badge of badges) {
@@ -3618,11 +3629,7 @@ async function loadTimelineAnnotationBadges() {
     const recordId = badge.dataset.recordId;
     if (!photoUrl) continue;
     const count = await getAnnotationCount(photoUrl, recordId);
-    if (count > 0) {
-      badge.style.display = 'flex';
-      const countEl = badge.querySelector('.annBadgeCount');
-      if (countEl) countEl.textContent = count;
-    }
+    updateAnnotationBadge(badge, count);
   }
 }
 
@@ -4542,11 +4549,7 @@ async function loadRecordAnnotationBadges() {
     const recordId = badge.dataset.recordId;
     if (!photoUrl) continue;
     const count = await getAnnotationCount(photoUrl, recordId);
-    if (count > 0) {
-      badge.style.display = 'flex';
-      const countEl = badge.querySelector('.annBadgeCount');
-      if (countEl) countEl.textContent = count;
-    }
+    updateAnnotationBadge(badge, count);
   }
 }
 
