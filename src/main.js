@@ -2257,19 +2257,22 @@ function calculateGrowthMetrics(group, records) {
   };
 }
 
-function calculateExperimentConclusion(exp, groupsData, groupMetrics) {
+function calculateExperimentConclusion(exp, groupsData, groupMetrics, alignMode) {
   const validGroups = [];
   const warnings = [];
 
   groupsData.forEach((gd, idx) => {
     const m = groupMetrics[idx];
-    const isInsufficient = gd.records.length < 2;
+    const calcRecords = alignMode === 'relative' ? gd.alignedPoints : gd.records;
+    const isInsufficient = calcRecords.length < 2;
 
     validGroups.push({
       index: idx,
       name: gd.group.name,
       color: gd.group.color,
-      records: gd.records,
+      records: calcRecords,
+      allRecords: gd.records,
+      alignedRecords: gd.alignedPoints,
       metrics: m,
       isInsufficient,
       hasTimeRangeIssue: false,
@@ -2289,7 +2292,7 @@ function calculateExperimentConclusion(exp, groupsData, groupMetrics) {
 
     sufficientRanges.forEach(r => {
       const g = validGroups.find(vg => vg.name === r.name);
-      if (g) g.dateRangeInfo = { start: r.start, end: r.end, days: r.days };
+      if (g) g.dateRangeInfo = { start: r.start, end: r.end, days: r.days, alignMode };
     });
 
     if (sufficientRanges.length >= 2) {
@@ -2303,7 +2306,7 @@ function calculateExperimentConclusion(exp, groupsData, groupMetrics) {
           const g = validGroups.find(vg => vg.name === r.name);
           if (g) g.hasTimeRangeIssue = true;
         });
-        warnings.push('各实验组的时间范围无重叠，对比结论可能不可靠');
+        warnings.push(`各实验组${alignMode === 'relative' ? '对齐后' : ''}的时间范围无重叠，对比结论可能不可靠`);
       } else if (maxDays > 0 && (maxDays - minDays) / maxDays > 0.5) {
         sufficientRanges.forEach(r => {
           if (r.days < maxDays * 0.5) {
@@ -2311,7 +2314,7 @@ function calculateExperimentConclusion(exp, groupsData, groupMetrics) {
             if (g) g.hasTimeRangeIssue = true;
           }
         });
-        warnings.push('各实验组时间跨度差异较大（超过50%），对比可能存在偏差');
+        warnings.push(`各实验组${alignMode === 'relative' ? '对齐后' : ''}时间跨度差异较大（超过50%），对比可能存在偏差`);
       }
     }
   }
@@ -2339,7 +2342,8 @@ function calculateExperimentConclusion(exp, groupsData, groupMetrics) {
           configuredEnd: configuredRanges[i].configuredEnd,
           actualStart: configuredRanges[i].actualStart,
           actualEnd: configuredRanges[i].actualEnd,
-          coverage: configuredRanges[i].coverage
+          coverage: configuredRanges[i].coverage,
+          alignMode
         };
       }
     });
@@ -2363,13 +2367,13 @@ function calculateExperimentConclusion(exp, groupsData, groupMetrics) {
         const idx = configuredRanges.indexOf(r);
         validGroups[idx].hasTimeRangeIssue = true;
       });
-      warnings.push(`有${lowCoverageGroups.length}组实际记录未充分覆盖配置的时间段，数据覆盖度不足80%`);
+      warnings.push(`有${lowCoverageGroups.length}组${alignMode === 'relative' ? '对齐后' : ''}实际记录未充分覆盖配置的时间段，数据覆盖度不足80%`);
     }
   }
 
   validGroups.forEach(g => {
     if (g.isInsufficient) {
-      warnings.push(`「${g.name}」记录不足2条，数据不足以计算可靠的增长率`);
+      warnings.push(`「${g.name}」${alignMode === 'relative' ? '对齐后' : ''}记录不足2条，数据不足以计算可靠的增长率`);
     } else if (g.hasTimeRangeIssue) {
       warnings.push(`「${g.name}」时间范围与其他组不一致或覆盖度不足，可能影响对比公平性`);
     }
@@ -2399,7 +2403,7 @@ function calculateExperimentConclusion(exp, groupsData, groupMetrics) {
     };
   }
 
-  return { validGroups, warnings, comparisons, hasEnoughData: sufficientGroups.length >= 2 };
+  return { validGroups, warnings, comparisons, hasEnoughData: sufficientGroups.length >= 2, alignMode };
 }
 
 function drawMultiLineCompare(selector, alignedData, groupsData, field, unit, yAxisLabel) {
@@ -2818,9 +2822,12 @@ function renderExperimentView() {
 
   const { alignedData, groupsData } = alignExperimentData(exp, experimentAlignMode);
 
-  const groupMetrics = groupsData.map(gd => calculateGrowthMetrics(gd.group, gd.records));
+  const groupMetrics = groupsData.map(gd => {
+    const calcRecords = experimentAlignMode === 'relative' ? gd.alignedPoints : gd.records;
+    return calculateGrowthMetrics(gd.group, calcRecords);
+  });
 
-  const conclusion = calculateExperimentConclusion(exp, groupsData, groupMetrics);
+  const conclusion = calculateExperimentConclusion(exp, groupsData, groupMetrics, experimentAlignMode);
 
   experimentViewInfo.innerHTML = `
     <div class="experimentViewHeader">
@@ -2854,28 +2861,28 @@ function renderExperimentView() {
             <div class="experimentMetricStats">
               <div class="experimentMetricItem">
                 <span class="metricLabel">高度增长率</span>
-                <span class="metricValue">${m.heightGrowthRate}<span class="metricUnit">cm/天</span></span>
-                <span class="metricRate">总增长 +${m.heightGrowth}cm</span>
+                <span class="metricValue">${g.isInsufficient ? '--' : m.heightGrowthRate}<span class="metricUnit">${g.isInsufficient ? '' : 'cm/天'}</span></span>
+                <span class="metricRate">${g.isInsufficient ? '数据不足，无法计算' : `总增长 +${m.heightGrowth}cm`}</span>
               </div>
               <div class="experimentMetricItem">
                 <span class="metricLabel">叶片增长率</span>
-                <span class="metricValue">${m.leavesGrowthRate}<span class="metricUnit">片/天</span></span>
-                <span class="metricRate">总增长 +${m.leavesGrowth}片</span>
+                <span class="metricValue">${g.isInsufficient ? '--' : m.leavesGrowthRate}<span class="metricUnit">${g.isInsufficient ? '' : '片/天'}</span></span>
+                <span class="metricRate">${g.isInsufficient ? '数据不足，无法计算' : `总增长 +${m.leavesGrowth}片`}</span>
               </div>
               <div class="experimentMetricItem">
                 <span class="metricLabel">平均浇水量</span>
-                <span class="metricValue">${m.avgWater}<span class="metricUnit">ml/次</span></span>
-                <span class="metricRate">累计 ${m.totalWater}ml</span>
+                <span class="metricValue">${g.isInsufficient ? '--' : m.avgWater}<span class="metricUnit">${g.isInsufficient ? '' : 'ml/次'}</span></span>
+                <span class="metricRate">${g.isInsufficient ? `仅 ${m.recordCount} 条记录` : `累计 ${m.totalWater}ml`}</span>
               </div>
               <div class="experimentMetricItem">
                 <span class="metricLabel">平均光照</span>
-                <span class="metricValue">${m.avgLight}<span class="metricUnit">h/天</span></span>
-                <span class="metricRate">累计 ${m.totalLight}h</span>
+                <span class="metricValue">${g.isInsufficient ? '--' : m.avgLight}<span class="metricUnit">${g.isInsufficient ? '' : 'h/天'}</span></span>
+                <span class="metricRate">${g.isInsufficient ? `仅 ${m.recordCount} 条记录` : `累计 ${m.totalLight}h`}</span>
               </div>
               <div class="experimentMetricItem">
                 <span class="metricLabel">记录密度</span>
-                <span class="metricValue">${m.recordDensity}<span class="metricUnit">条/天</span></span>
-                <span class="metricRate">共 ${m.recordCount} 条 / ${m.durationDays} 天</span>
+                <span class="metricValue">${g.isInsufficient ? '--' : m.recordDensity}<span class="metricUnit">${g.isInsufficient ? '' : '条/天'}</span></span>
+                <span class="metricRate">${g.isInsufficient ? `共 ${m.recordCount} 条记录` : `共 ${m.recordCount} 条 / ${m.durationDays} 天`}</span>
               </div>
             </div>
           </div>
