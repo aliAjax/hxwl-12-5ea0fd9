@@ -3554,27 +3554,61 @@ function renderTimeline() {
 
   const data = plantData[timelinePlant];
 
+  const noPhotoRecords = data.records.filter((r) => !r.photo || r.photo.trim() === '');
+  const noPhotoCount = noPhotoRecords.length;
+
   if (!data.hasPhotos) {
     content.innerHTML = `
       <div class="timelineEmpty">
         <div class="timelineEmptyIcon">📷</div>
         <h4>「${timelinePlant}」暂无照片记录</h4>
         <p>在添加生长记录时上传照片，即可在此处查看时间轴</p>
-        <div class="timelineNoPhotosList">
-          <h5>已有记录（${data.totalRecords}条）：</h5>
-          ${data.records.map((r) => `
-            <div class="timelineNoPhotoItem">
-              <span class="timelineDate">${r.date}</span>
-              <span class="timelineMeta">${r.height}cm · ${r.leaves}片叶</span>
-              <span class="timelineState">${r.state}</span>
-              <span class="muted">无照片</span>
-            </div>
-          `).join('')}
+        <div class="timelineReminderCard">
+          <div class="timelineReminderHead">
+            <span class="timelineReminderIcon">⚠️</span>
+            <span class="timelineReminderTitle">补拍提醒</span>
+            <span class="timelineReminderCount">${noPhotoCount} 条记录待补拍</span>
+          </div>
+          <div class="timelineReminderList">
+            ${noPhotoRecords.map((r) => `
+              <div class="timelineReminderItem">
+                <div class="timelineReminderItemInfo">
+                  <span class="timelineDate">${r.date}</span>
+                  <span class="timelineMeta">${r.height}cm · ${r.leaves}片叶</span>
+                  <span class="timelineState">${r.state}</span>
+                </div>
+                <button class="timelineReshootBtn" data-role="timeline-edit" data-record-id="${r.id}">📸 补拍</button>
+              </div>
+            `).join('')}
+          </div>
         </div>
       </div>
     `;
+    bindTimelineEditEvents();
     return;
   }
+
+  const reminderHtml = noPhotoCount > 0 ? `
+    <div class="timelineReminderCard">
+      <div class="timelineReminderHead">
+        <span class="timelineReminderIcon">⚠️</span>
+        <span class="timelineReminderTitle">补拍提醒</span>
+        <span class="timelineReminderCount">${noPhotoCount} 条记录待补拍</span>
+      </div>
+      <div class="timelineReminderList">
+        ${noPhotoRecords.map((r) => `
+          <div class="timelineReminderItem">
+            <div class="timelineReminderItemInfo">
+              <span class="timelineDate">${r.date}</span>
+              <span class="timelineMeta">${r.height}cm · ${r.leaves}片叶</span>
+              <span class="timelineState">${r.state}</span>
+            </div>
+            <button class="timelineReshootBtn" data-role="timeline-edit" data-record-id="${r.id}">📸 补拍</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
 
   content.innerHTML = `
     <div class="timelineHeader">
@@ -3584,6 +3618,7 @@ function renderTimeline() {
       </div>
       <button class="compareBtn" id="openCompareBtn">开启对比模式</button>
     </div>
+    ${reminderHtml}
     <div class="timeline">
       ${data.records.map((record, index) => {
         const hasPhoto = record.photo && record.photo.trim() !== '';
@@ -3626,6 +3661,11 @@ function renderTimeline() {
                 <span class="metaItem">🍃 ${record.leaves}片叶</span>
               </div>
               <p class="timelineState">${record.state}</p>
+              ${!hasPhoto ? `
+                <div class="timelineCardActions">
+                  <button class="timelineEditBtn" data-role="timeline-edit" data-record-id="${record.id}">✏️ 编辑补拍</button>
+                </div>
+              ` : ''}
             </div>
           </div>
         `;
@@ -3642,6 +3682,7 @@ function renderTimeline() {
 
   loadTimelinePhotos();
   bindTimelinePhotoEvents();
+  bindTimelineEditEvents();
 }
 
 async function loadTimelinePhotos() {
@@ -3716,6 +3757,77 @@ function bindTimelinePhotoEvents() {
   });
 
   loadTimelineAnnotationBadges();
+}
+
+function bindTimelineEditEvents() {
+  document.querySelectorAll('[data-role="timeline-edit"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const recordId = btn.dataset.recordId;
+      const record = records.find((r) => r.id === recordId);
+      if (!record) return;
+
+      editingId = record.id;
+      pendingCareTodo = null;
+      Object.entries(record).forEach(([name, value]) => {
+        if (form.elements[name]) {
+          form.elements[name].value = value;
+          if (name === 'plant') {
+            showPlantNotesHint(value);
+          }
+        }
+      });
+
+      pendingPhotoUpload = null;
+      photoRemovedByUser = false;
+      if (record.photo) {
+        if (PhotoManager.isLocalImage(record.photo)) {
+          try {
+            const thumbUrl = await PhotoManager.getThumbnailUrl(record.photo);
+            const imgId = PhotoManager.getImageId(record.photo);
+            const photoData = await PhotoStorage.get(imgId);
+            if (thumbUrl && photoData) {
+              pendingPhotoUpload = {
+                url: record.photo,
+                imageId: imgId,
+                thumbnail: thumbUrl,
+                data: photoData.data,
+                compressedSize: photoData.size,
+                originalSize: photoData.size
+              };
+              photoPreview.src = thumbUrl;
+              const sizeKB = (photoData.size / 1024).toFixed(1);
+              photoPreviewInfo.innerHTML = `本地照片 · ${sizeKB}KB`;
+              photoPreviewContainer.style.display = 'block';
+              photoUploadArea.querySelector('.photoUploadPlaceholder').style.display = 'none';
+              currentPhotoTab = 'upload';
+            }
+          } catch (err) {
+            console.warn('加载编辑预览失败:', err);
+          }
+        } else {
+          currentPhotoTab = 'url';
+        }
+      } else {
+        currentPhotoTab = 'upload';
+        photoPreviewContainer.style.display = 'none';
+        photoUploadArea.querySelector('.photoUploadPlaceholder').style.display = 'flex';
+      }
+
+      photoTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === currentPhotoTab));
+      photoTabContents.forEach(content => {
+        content.style.display = content.dataset.tabContent === currentPhotoTab ? 'block' : 'none';
+      });
+
+      form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      setTimeout(() => {
+        photoUploadArea.classList.add('flashHighlight');
+        setTimeout(() => {
+          photoUploadArea.classList.remove('flashHighlight');
+        }, 1500);
+      }, 600);
+    });
+  });
 }
 
 async function getAnnotationCount(photoUrl, recordId) {
