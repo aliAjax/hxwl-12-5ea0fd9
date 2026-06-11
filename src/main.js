@@ -583,6 +583,7 @@ document.querySelector('#app').innerHTML = `
             <option value="">选择植物</option>
           </select>
           <button type="button" class="quickAddPlant" id="quickAddPlant" title="快速新增植物">+ 新增</button>
+          <button type="button" class="useLastRecordBtn" id="useLastRecordBtn" style="display: none;">📋 沿用上次</button>
         </div>
         <input name="date" type="date" required />
         <div class="pair">
@@ -882,6 +883,7 @@ const archiveForm = document.querySelector('#archiveForm');
 const archiveToggle = document.querySelector('#archiveToggle');
 const plantSelect = document.querySelector('#plantSelect');
 const quickAddPlant = document.querySelector('#quickAddPlant');
+const useLastRecordBtn = document.querySelector('#useLastRecordBtn');
 const plantNotesHint = document.querySelector('#plantNotesHint');
 const archiveCancelBtn = document.querySelector('#archiveCancelBtn');
 const archiveFormTitle = document.querySelector('#archiveFormTitle');
@@ -2993,12 +2995,36 @@ archiveToggle.addEventListener('click', () => {
 });
 
 plantSelect.addEventListener('change', () => {
-  showPlantNotesHint(plantSelect.value);
+  const selectedPlant = plantSelect.value;
+  showPlantNotesHint(selectedPlant);
+  if (selectedPlant && !editingId) {
+    const lastRecord = getPlantLatestRecord(selectedPlant);
+    useLastRecordBtn.style.display = lastRecord ? 'inline-block' : 'none';
+  } else {
+    useLastRecordBtn.style.display = 'none';
+  }
 });
 
 quickAddPlant.addEventListener('click', () => {
   document.querySelector('#archivePanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
   archiveForm.elements.nickname.focus();
+});
+
+useLastRecordBtn.addEventListener('click', () => {
+  const selectedPlant = plantSelect.value;
+  if (!selectedPlant || editingId) return;
+
+  const lastRecord = getPlantLatestRecord(selectedPlant);
+  if (!lastRecord) {
+    alert('该植物暂无历史记录');
+    return;
+  }
+
+  form.elements.water.value = lastRecord.water;
+  form.elements.light.value = lastRecord.light;
+  form.elements.state.value = lastRecord.state;
+  form.elements.date.value = formatDate(new Date());
+  form.elements.state.focus();
 });
 
 photoTabs.forEach(tab => {
@@ -3138,6 +3164,8 @@ form.addEventListener('submit', async (event) => {
   pendingPhotoUpload = null;
   photoRemovedByUser = false;
   form.reset();
+  form.elements.date.value = formatDate(new Date());
+  useLastRecordBtn.style.display = 'none';
   photoPreviewContainer.style.display = 'none';
   photoUploadArea.querySelector('.photoUploadPlaceholder').style.display = 'flex';
   photoFileInput.value = '';
@@ -4750,6 +4778,7 @@ function render() {
     photoTabContents.forEach(content => {
       content.style.display = content.dataset.tabContent === currentPhotoTab ? 'block' : 'none';
     });
+    useLastRecordBtn.style.display = 'none';
   }));
   setTimeout(loadRecordThumbnails, 50);
   setTimeout(loadRecordThumbnails, 300);
@@ -5350,5 +5379,8 @@ diagnosisRefreshBtn.addEventListener('click', () => {
 });
 
 initAnnotationEvents();
+
+form.elements.date.value = formatDate(new Date());
+useLastRecordBtn.style.display = 'none';
 
 render();

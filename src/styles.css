@@ -1034,6 +1034,21 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
   white-space: nowrap;
 }
 
+.useLastRecordBtn {
+  background: #ebf8ff;
+  color: #2b6cb0;
+  border: 0;
+  border-radius: 6px;
+  padding: 11px 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.useLastRecordBtn:hover {
+  background: #bee3f8;
+}
+
 .plantNotesHint {
   display: flex;
   align-items: flex-start;
@@ -1118,6 +1133,9 @@ svg text { fill: #60715f; font-size: 13px; text-anchor: middle; }
     align-items: stretch;
   }
   .quickAddPlant {
+    width: 100%;
+  }
+  .useLastRecordBtn {
     width: 100%;
   }
   .archiveHead {
